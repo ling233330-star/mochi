@@ -1,3 +1,24 @@
+### 2026-09-06 01:2x（#211 聊天闪动双源收口：收发消息整窗重建 200 气泡 + 归一化收尾无条件重建；本次构建者：无——本会话未构建，构建权归在途会话收口时顺带）
+- [AI-A 域]（**改动文件：src/js/chat.js（①addRec 窗口超限判定 RENDER_MAX→WINDOW_MAX；②runDeferredNormalization finish 渲染闸 changedHi/removedAll/sysNickChanged）、build.mjs（#211 哨兵 +2）、FIX-REGRESSION.md（#211 行）、tools/verify-chat-rebuild.mjs（新增 13 断言，verify:all 自动纳入）**；构建状态：**未构建——修复①已随并行会话 00:47 产物 mochi-mtom8td8 在树（裹入时 chat.js 仅含修复①），修复②待下次构建带上（哨兵已登记，--check-sentinels 446 全绿哑 0）**）。
+- 需求：iQOO12+Chrome 151 报「打开聊天偶尔会闪动+对方回复消息会闪一下」，用户明说其他设备型号也有。
+- 根因两处（均与机型无关、与**历史条数**相关，解释了「同版本有的设备不闪」）：①addRec 窗口超限判定 `msgs.length - renderStart > RENDER_MAX` 在每次钳位渲染后（renderStart=len−200）只要再来一条消息就恒为真——历史 >200 条的桌面每收/发一条消息都整窗重建 200 个气泡（img 全部重建重新解码=肉眼闪一下）；≤200 条的桌面 renderStart=0 从不命中。②后台分批归一化 finish 曾在「发现任意改动且聊天页可见」时无条件 renderWindow 整窗重建——历史里有待迁移老格式数据时打开聊天必白闪一次（改动全在窗口外也闪）。
+- 方案：①判定收紧到 WINDOW_MAX(400) 硬上限（与 loadOlderIncremental→pruneWindowBottom 同口径），常规收发走 renderMsg 增量追加，DOM 上限语义不变；②finish 记录改动最靠后下标 changedHi 与结构性删除数 removedAll——改动全部在窗口外（changedHi<renderStart）时跳过重建只落盘，屏上数据真变了仍重渲，sysNick 清扫/相邻删除（下标位移）保守整窗。
+- 验证：node --check 过；tools/verify-chat-rebuild.mjs 13/13（S0-S4 无头 Chrome 实测 9MB 懒读大历史：打开静置/对方回复/自己发送零整窗重建+回复走增量追加，MutationObserver 分类；G1-G4 抽 chat.js 真实源码桩环境验渲染闸四场景）；verify-chat-tail 27/27、quote-image 21/21、media-pool 8/8；tmp 探针已删。
+- 待对方处理：无。chat.js 本会话只占 #211 两处（2840 附近/622-660），#215 在途区域（输入栏取值）与之无交集；下次构建请带上修复②（构建自然包含）。
+- 【真机:待验证】（iQOO12 及任意大历史桌面）：打开聊天与连收多条消息，消息区均不再整屏闪；小历史设备行为不变。
+
+### 2026-09-06 01:1x（信息诊断错误环三补强：条目带版本+启动序号、案发视口现场、去重计次；未构建·随在途联合批次收口）
+- [AI-B 域]（**改动文件：src/js/device.js（复制诊断模块：errSnap 补 v（版本）/b（启动 id#N）字段 + pushErr 时 mochiVvDiag 六值迷你现场 vp（fs/vv/gap/平移/scale/kb，~50 字符）；30s 去重改累加次数 c；报告头部时间行带「本次启动 id#N」、最近错误逐条输出 [版本]/启动/×N/｛现场｝，旧条目与监视器直写条目无字段自然省略）**；构建状态：**未构建**——树内 #211/#215/#210/#216 联合批次 staged 在途（其 device.js 改动仅 ~1972 行 mochiViewportForm 一处，与本改 300-380/730/1216 三段零重叠已 git diff 核实），构建权留收口会话随库打入）。
+- 背景：用户问【信息诊断】还能怎么优化，八条建议中指定 1/2/7 落地（错误归属/案发现场/重复计次）。
+- 自验：node --check 过；--check-sentinels 446 全绿哑 0（未碰任何他人锚点）。
+- 【真机:待验证】任意机型触发一次报错后打开诊断：最近错误条目带 [v3.26.x]/启动 id#N/×次数/｛现场 fs= vv= gap= 平移= s= kb=｝；报告头部「本次启动」与条目 b 对号。
+
+### 2026-09-06 01:5x（#216 音乐封面全丢含新加（一加Ace3+Edge 多机型）+ #214 standalone 顶部黑边残留（manifest theme_color）——src/tools/台账全就绪·未构建，移交下一口构建者随库；本次构建者：非本会话）
+- [AI-A 域·跨域声明]（**改动文件：src/js/music-player.js（封面管线直链化：resolveCoverDirect 落库前跟随 302 解析网易 CDN 直链 + normNeteaseCoverUrl 统一 https?param=300y300 + fetchNeteaseCoverFallback 第二封面源 + COVER_PROXY_RE 存量代理封面迁移队列（打开音乐页窗口化/歌单/正在播放/切歌四触发点 + 历史/我的历史/TA收藏快照同步，in-flight 用不落盘 Set）；跨域改 AI-A 名下音乐文件，理由：用户直接指派修复）、src/pwa/manifest.json（theme_color #111111→#e9e9e9：#201 只改 meta，该机 standalone 形态安卓 Edge 取 manifest 仍黑边）、build.mjs（哨兵 +5 追加式未动他人条目 + 检查器扩 artifactText 支持 pwa/ 产物文件与非 js/css 免压缩比对）、tools/verify-music-cover-direct.mjs（新增 17 断言端到端）、FIX-REGRESSION.md（#214/#216 行 + 设备索引一加Ace3）**；构建状态：**未构建**——树内尚有 #211（chat.js 闪动收口）/#215 华为P50E（chat.js 发送取值兜底）/#210 letterbox 提示行（device.js）等在途批次，按不夹带+禁并行构建规则本会话只改 src+台账；下一口构建者构建时随库自动带上，构建后请复跑 node tools/verify-music-cover-direct.mjs 应 17/17）。
+- 需求/根因/方案：见 FIX-REGRESSION 216/214（封面=全链押第三方单点 injahow：存量封面本存的就是其图片代理 URL，代理慢/挂新旧一起丢+新加歌 meting 8s 挂起即无封面，诊断三条 BodyStreamBuffer aborted 吻合；黑边=#201 只改 meta，standalone 形态安卓 Edge 状态栏取 manifest theme_color 仍 #111111）。
+- 验证：node --check 过；临时副本全量构建哨兵 444/444 哑 0；verify-music-cover-direct 17/17；相邻回归 dur-cover 9/9、history-cover 8/8、ta-fav-keep 10/10、bg-resume 12/12、single-audio 15/15。
+- 编号占用声明：#216（音乐封面）/#214（manifest 黑边）归本会话；#213 曾短暂占用已让出（并行会话已改用 #215），树内无 213 残留。
+- 【真机:待验证】见 FIX-REGRESSION 216/214。
 ### 2026-09-05 23:2x（#187 平板默认观感改全宽铺满（用户决策）：竖横屏 100vw 替代 640/820 限宽居中；已构建）
 * [AI-B 域]（**改动文件：src/css/base.css（平板区块两处宽度值）、FIX-REGRESSION.md（#187 设计变更行）**）。
 * 用户决策：多台 iPad 反馈「四边不贴合居中」，平板默认从 v3.7.x 限宽居中改为全宽；横屏气泡 460px 封顶/弹窗 360px 等内部约束保留。

@@ -108,12 +108,12 @@ const seeded = await evalJs(`(function(){
   var px='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAF0lEQVR4nGP8z8Dwn4GBgYGJgYGBAQAkBgMBOOSShwAAAABJRU5ErkJggg==';
   var pad='';for(var p=0;p<30000;p++)pad+='x';
   for(var i=0;i<300;i++){
-    if(i<10) arr.push({side:'in',text:px,ts:t+i*60000});
+    if(i<10) arr.push({side:'in',special:'poke',text:'✉️ 拍了拍你，顺带问声好'+i,ts:t+i*60000});
     else arr.push({side:i%2?'in':'out',type:'text',text:'历史消息'+i+pad,ts:t+i*60000});
   }
   return String(window.chatImportMsgs(arr));
 })()`);
-ok(seeded === 'true', 'S0 种入 300 条×30KB≈9MB 历史（懒读门槛上）+最旧 10 条老格式', String(seeded));
+ok(seeded === 'true', 'S0 种入 300 条×30KB≈9MB 历史（懒读门槛上）+最旧 10 条 ✉️ 老格式拍一拍', String(seeded));
 await sleep(3000);
 
 // —— 冷启动：刷新（IDB 已有大历史），进桌面 ——
@@ -165,17 +165,81 @@ evArr = JSON.parse(evs);
 ok(rebuildsOf(evArr).length === 0, 'S3 对方回复不整窗重建（#211 核心）', JSON.stringify(rebuildsOf(evArr)));
 ok(evArr.some(e => e.add >= 1 && e.add <= 3 && e.rem === 0), 'S3 回复走增量追加（add 1~3/rem 0）', evs.slice(0, 200));
 
-// —— S5 归一化迁移真实发生（type 已被后台迁移补上）但零重建=S2 断言非空转——
-await evalJs('window.__vcrArm(); true');
-const m0type = await evalJs('(window.getChatMsgs && window.getChatMsgs()[0] && window.getChatMsgs()[0].type) || "?"');
-ok(m0type === 'image', 'S5 老格式消息已被后台归一化迁移（type 补上）', String(m0type));
-
 // —— S4 自己发送消息：同样不得整窗重建 ——
 await evalJs('window.__vcrArm(); window.chatSendMsg("我自己发的一条测试消息"); true');
 await sleep(3000);
 evs = await evalJs('JSON.stringify(window.__vcr.events)') || '[]';
 evArr = JSON.parse(evs);
 ok(rebuildsOf(evArr).length === 0, 'S4 自己发送不整窗重建', JSON.stringify(rebuildsOf(evArr)));
+
+
+// ===== Part 2：归一化收尾渲染闸（#211 修复2）纯 Node 桩环境行为断言 =====
+// 浏览器端触发依赖真实 IDB 懒读时序（无头下不稳定），改抽真实源码直接验闸门逻辑。
+const srcPath2 = new URL('../src/js/chat.js', import.meta.url);
+const text2 = readFileSync(srcPath2, 'utf8');
+function cut2(a, b) {
+  const s = text2.indexOf(a); const e = text2.indexOf(b, s + 1);
+  if (s < 0 || e < 0 || e <= s) { console.error('抽取失败：' + JSON.stringify(a)); process.exit(2); }
+  return text2.slice(s, e);
+}
+const srcConsts = cut2('const ICON_BELL', 'function scheduleDeferredNormalization');
+const srcSched = cut2('function scheduleDeferredNormalization', 'function runDeferredNormalization');
+const srcRun = cut2('function runDeferredNormalization', 'function migrateLegacyMediaMsgs');
+const srcDup = cut2('function dupSig', 'function collapseRapidDups');
+
+function makeGateEnv(msgs, renderStart) {
+  const rwCalls = []; let persistCalls = 0;
+  const env = {
+    msgs, renderStart, normTimer: null, normPrefix: null,
+    authLoadedPrefix: 'p', CHAT_LAZY_BYTES: 8 * 1024 * 1024,
+    window: { activePrefix: () => 'p', idbSet: () => {} },
+    chatVisible: () => true, chatNearBottom: () => true,
+    renderWindow: () => { rwCalls.push(1); },
+    scrollChatBottom: () => {},
+    sysNickCatchup: () => false,
+    chatLedgerGuard: () => true,
+    persistMsgsToIdb: () => { persistCalls++; },
+    writeLsSnapshot: () => {},
+    chatLedgerSave: () => {},
+    msgsBytes: () => 0,
+    setTimeout: (cb) => { cb(); return 0; },
+    Date, JSON, Math, Set, console
+  };
+  const src = [srcConsts, srcSched, srcRun, srcDup].join(String.fromCharCode(10));
+  const fns = new Function('env', 'with (env) { ' + src + ' return { scheduleDeferredNormalization }; }')(env);
+  return { env, rwCalls, run: fns.scheduleDeferredNormalization, getPersist: () => persistCalls };
+}
+const QUIRK = (i) => ({ side: 'in', special: 'poke', text: '✉️ 拍了拍你，顺带问声好' + i, ts: 1700000000000 + i * 60000 });
+const PLAIN = (i) => ({ side: i % 2 ? 'in' : 'out', type: 'text', text: '历史消息' + i, ts: 1700000000000 + i * 60000 });
+
+// G1 迁移改动全部在渲染窗口外（最旧 10 条，窗口=最后 200）→ 不重建、照常落盘
+{
+  const msgs = []; for (let i = 0; i < 300; i++) msgs.push(i < 10 ? QUIRK(i) : PLAIN(i));
+  const g = makeGateEnv(msgs, 100); g.run();
+  ok(g.rwCalls.length === 0, 'G1 窗口外迁移：不整窗重建（#211 修复2 核心）', 'rwCalls=' + g.rwCalls.length);
+  ok(g.getPersist() >= 1, 'G1 窗口外迁移：修复数据照常落盘', 'persist=' + g.getPersist());
+  ok(String(msgs[0].text).indexOf('✉') < 0, 'G1 迁移真实发生（✉ 已还原 icon）', String(msgs[0].text).slice(0, 20));
+}
+// G2 迁移改动落在渲染窗口内（屏上数据真变了）→ 必须重渲
+{
+  const msgs = []; for (let i = 0; i < 300; i++) msgs.push(i === 250 ? QUIRK(i) : PLAIN(i));
+  const g = makeGateEnv(msgs, 100); g.run();
+  ok(g.rwCalls.length === 1, 'G2 窗口内迁移：整窗重渲保留', 'rwCalls=' + g.rwCalls.length);
+}
+// G3 相邻重复删除（结构性变化，下标位移）→ 保守整窗重渲
+{
+  const msgs = []; for (let i = 0; i < 300; i++) msgs.push(PLAIN(i));
+  msgs.splice(251, 0, { side: 'out', type: 'text', text: '历史消息250', ts: msgs[250].ts + 500 });
+  const g = makeGateEnv(msgs, 100); g.run();
+  ok(g.rwCalls.length === 1, 'G3 相邻重复删除：保守整窗重渲', 'rwCalls=' + g.rwCalls.length);
+}
+// G4 sysNick 改名清扫（改动位置不可知）→ 保守整窗重渲
+{
+  const msgs = []; for (let i = 0; i < 300; i++) msgs.push(PLAIN(i));
+  const g = makeGateEnv(msgs, 100);
+  g.env.sysNickCatchup = () => true; g.run();
+  ok(g.rwCalls.length === 1, 'G4 sysNick 清扫：保守整窗重渲', 'rwCalls=' + g.rwCalls.length);
+}
 
 console.log(fail ? ('FAIL ' + pass + '/' + (pass + fail)) : ('ALL PASS ' + pass + '/' + (pass + fail)));
 chrome.kill();

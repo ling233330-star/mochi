@@ -1072,3 +1072,20 @@ html.mochi-cover-top .phone .statusbar {
 .sfx-preset.on { background:var(--ink); color:#fff; border-color:var(--ink); }
 /* 卡片底部操作行：无自定义只显示上传，有自定义显示试听/清除 */
 .sfx-tools { display:flex; gap:8px; flex-wrap:wrap; padding:0 16px 14px; }
+
+/* ===== v3.27.x #218 互动频率引导提示条 ===== */
+/* TA 主动消息/连发多条/互动邀请随机触发时，提醒用户可自行调低或关闭（入口：设置 → 回复设置）；
+   纯提醒、不改任何默认值。定位/配色对齐 #cc-toast（bottom 120px + safe-area、z-index 同层），
+   元素由 reply-settings.js 按需创建 */
+#reply-guide-hint {
+  position:fixed; left:50%; bottom:calc(120px + var(--mochi-safe-bottom, env(safe-area-inset-bottom, 0px))); transform:translate(-50%, 10px);
+  background:rgba(17,17,17,.92); color:#fff; font-size:12.5px; line-height:1.5;
+  padding:10px 14px; border-radius:14px; z-index:99;
+  opacity:0; pointer-events:none; transition:opacity .25s ease, transform .25s ease;
+  max-width:82vw; display:flex; align-items:center; gap:10px; text-align:left;
+  box-shadow:0 4px 16px rgba(0,0,0,.18);
+}
+#reply-guide-hint.show { opacity:1; transform:translate(-50%, 0); pointer-events:auto; }
+#reply-guide-hint .rgh-go { flex:none; font-weight:700; color:#f5c452; white-space:nowrap; }
+/* 回复设置页顶部「这些都是概率、可自行调」说明行（template.html 静态） */
+.reply-guide-note { padding:10px 14px 2px; }

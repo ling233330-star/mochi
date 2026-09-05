@@ -78,6 +78,7 @@
             <p>系统或浏览器版本不同，适配表现可能不同，属正常现象。</p>
             <p>建议使用 Chrome、Edge 等主流浏览器，尽量不用手机自带默认浏览器（会有限制），用主流浏览器出现的兼容问题会少一些。</p>
             <p class="splash-hl">数据丢失属浏览器正常概率，请定期备份：本机不保留任何自动副本，你下载并保存好的导出文件就是唯一备份（别删、别只留在下载列表里）。</p>
+            <p class="splash-hl">TA 的主动消息、连发多条、互动邀请等都是按概率随机触发的——嫌频繁可在 设置 → 回复设置 调低概率（0 = 不触发）或直接关闭开关。</p>
             <p>完整说明在各章节内，可点上方目录跳转查看。</p>
           </div>
           <div class="splash-sec-wrap splash-sec-collapsible is-collapsed">
@@ -247,7 +248,8 @@
       <!-- v3.8.y：必须把公告滑到底才能进入——未到底时按钮置灰不可点，下方提示滑动 -->
       <div class="splash-enter-hint" id="splash-enter-hint" hidden>请滑到底部后进入</div>
       <div class="splash-btns">
-        <div class="splash-enter" id="splash-enter" hidden>点击进入</div>
+        <!-- v3.26.x：按钮文案「点击进入」→「我已阅读并知晓」——把进入动作显性化为已读确认（公告没人看的低成本对策第一步；门控/样式/脚本定位均未动） -->
+        <div class="splash-enter" id="splash-enter" hidden>我已阅读并知晓</div>
       </div>
       <!-- v3.26.x：数据加载超 12 秒仍未就绪时的逃生口（clock.js 控制显隐，默认 hidden）；
            点此进入会提示「数据仍在加载，部分内容可能暂时看不见」，避免静默放行误入空数据 -->
@@ -2129,7 +2131,7 @@
           <details class="lic-grp">
             <summary><span class="lg-num">31</span><span class="lg-name">开屏 / 系统</span><span class="lg-count">6</span></summary>
             <div class="lg-body">
-          <div class="lic-li">开屏加载动画（含公告 / 版本时间 / 数据加载等待 / 点击进入）</div>
+          <div class="lic-li">开屏加载动画（含公告 / 版本时间 / 数据加载等待 / 我已阅读并知晓）</div>
           <div class="lic-li">开屏公告远程化：notice.json 在线覆盖公告文案</div>
           <div class="lic-li">状态栏显示真实时间（每 15 秒校准一次）</div>
           <div class="lic-li">底部 tab：桌面 / 字卡库 / 设置，独立全屏页导航与状态栏隐藏</div>
@@ -2156,6 +2158,8 @@
         <button class="fav-tab" data-rp="ck">查岗</button>
         <button class="fav-tab" data-rp="other">其他</button>
       </div>
+      <!-- v3.27.x #218 互动频率引导：进页先讲清「这些都是随机概率、可自行调」，配合聊天页提示条 -->
+      <div class="gs-sub reply-guide-note">以下都是 TA 随机行为的触发概率（%）：嫌频繁就把数值调小，调到 0 = 不再触发；开关关掉 = 彻底关闭该行为。修改即时保存生效。</div>
       <div class="gs-scroll">
         <div class="gs-panel" data-rpanel="chat">
           <div class="gs-title">被动回复（联系人回你）</div>

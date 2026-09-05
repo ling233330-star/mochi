@@ -301,7 +301,7 @@
   //（#splash-ver 随之消失），诊断要等用户点进设置页才执行 → 版本号永远读不到、
   // 比对永远「本机无构建时间戳」。这里在 IIFE 启动时（开屏还在）先缓存一份，
   // collectDiag 改读缓存，不再依赖仍在 DOM 里的 #splash-ver。
-  let verCache = '', localTsCache = 0;
+  let verCache = '', localTsCache = 0, verShort = '';
   try {
     const sv = document.getElementById('splash-ver');
     if (sv) {
@@ -310,8 +310,20 @@
       const ts = sv.getAttribute('data-build-ts');
       verCache = verTxt + (ts ? ' 构建 ts=' + ts : '');
       localTsCache = Number(ts) || 0;
+      verShort = verTxt;
     }
   } catch (e) {}
+  try { if (!verShort) verShort = String(window.APP_VERSION || ''); } catch (e0) {}
+  // v3.27.x：启动序号（错误环条目归属用）——错误环跨刷新保留 20 条，光看本地时间戳
+  // 分不清「这条错误是本次启动新出，还是几次启动前的旧残留」。每次加载随机短 id +
+  // 持久计数第 N 次启动，errSnap 带上 b 字段、报告头部输出本行值，条目→启动一一对号。
+  const BOOT_ID = Math.random().toString(36).slice(2, 6);
+  const BOOT_N_KEY = 'xy-home-v2:__diag-boot-n';
+  let BOOT_N = 0;
+  try {
+    BOOT_N = (parseInt(localStorage.getItem(BOOT_N_KEY), 10) || 0) + 1;
+    localStorage.setItem(BOOT_N_KEY, String(BOOT_N));
+  } catch (e1) { BOOT_N = 0; }
 
   // ===== 错误自动采集（v3.16.x） =====
   // 报障文本自带最近错误栈：window.onerror / unhandledrejection 采集最近 ERR_CAP 条
@@ -327,10 +339,13 @@
   const ERR_STACK_RECENT = 3;
   function errSnap() {
     const d = window.mochiDevice || {};
-    return {
+    const ent = {
       t: Date.now(),
       ua: (navigator.userAgent || '').slice(0, 160),
       dev: 'M' + (d.isMobile ? 1 : 0) + ' T' + (d.isTablet ? 1 : 0) + ' I' + (d.isIOS ? 1 : 0) + ' A' + (d.isAndroid ? 1 : 0) + ' V' + (d.isVia ? 1 : 0),
+      // v3.27.x：版本 + 启动序号——错误环跨版本/跨启动残留，报障文本要能对号
+      v: verShort || undefined,
+      b: BOOT_ID + '#' + BOOT_N,
       page: (function () {
         var v = '';
         try {
@@ -342,6 +357,24 @@
       })(),
       href: (location.pathname || '').slice(0, 80)
     };
+    // v3.27.x：案发瞬间迷你视口现场——视口类 bug 多为「事发变形、点开诊断时已被
+    // 自愈复原」，事后静态采集永远看不到案发几何。报错那一刻抓 6 个关键值（~50 字符），
+    // 旧条目/探针未挂时不带该字段，不阻塞入环。
+    try {
+      if (typeof window.mochiVvDiag === 'function') {
+        const g = window.mochiVvDiag();
+        if (g) {
+          const FSM = { '关闭': '0', '原生全屏': 'fs', 'CSS兜底全屏': 'css', 'iOS隐藏模拟状态栏': 'ios', '系统级全屏(display_override)': 'sys' };
+          ent.vp = 'fs=' + (FSM[g.fsMode] || String(g.fsMode || '?').slice(0, 4))
+            + ' vv=' + (g.vvH == null ? '?' : g.vvH)
+            + ' gap=' + (g.gapBottom == null ? '?' : g.gapBottom)
+            + ' 平移=' + (g.vvOffsetTop == null ? '?' : g.vvOffsetTop)
+            + ' s=' + (g.vvScale == null ? '?' : g.vvScale)
+            + ' kb=' + (g.kb && g.kb.kbActive ? 1 : 0);
+        }
+      }
+    } catch (e2) {}
+    return ent;
   }
   function pushErr(msg, stack) {
     try {
@@ -350,19 +383,21 @@
         var old = localStorage.getItem(ERR_KEY);
         if (old) { var o = JSON.parse(old); if (Array.isArray(o)) arr = o; }
       } catch (e) {}
-      var ent = Object.assign({ msg: String(msg).slice(0, 300) }, errSnap());
+      var ent = Object.assign({ msg: String(msg).slice(0, 300), c: 1 }, errSnap());
       var st = String(stack || '').slice(0, 400);
       if (st) ent.stack = st;
       // 30s 内同文+同页去重（v3.27.x 改）：原只比最后一条——两类漏网：
       // ① 定时器/轮询同类错误每 5s 触发一次，仍会写满环形缓冲刷掉其他线索；
       // ② 两种错误交替出现时，最后一条永远不匹配，双双反复入库。
-      // 现倒查最近 5 条：同 msg + 同页面 + 30s 内 → 视为重复（更新时间戳，保持出现顺序）
+      // 现倒查最近 5 条：同 msg + 同页面 + 30s 内 → 视为重复（累加次数 c + 更新时间戳，
+      // 保持出现顺序——「同一错误刷了 N 次」本身是线索，不能被去重抹掉）
       const nowT = ent.t || Date.now();
       const dupIdx = arr.findIndex(function (it) {
         return it && it.msg === ent.msg && (it.page || '') === (ent.page || '') && (nowT - (it.t || 0)) < 30000;
       });
       if (dupIdx >= 0) {
         arr[dupIdx].t = nowT;
+        arr[dupIdx].c = (arr[dupIdx].c || 1) + 1;
         try { localStorage.setItem(ERR_KEY, JSON.stringify(arr)); } catch (e2) {}
         try { if (window.idbSet) window.idbSet(ERR_KEY, JSON.stringify(arr)); } catch (e2) {}
         return;
@@ -727,7 +762,8 @@
     let ver = verCache || '', localTs = localTsCache || 0;
     if (!ver) { try { ver = window.APP_VERSION || ''; } catch (e) {} }
     L.push('Mochi 诊断信息（' + ver + '）');
-    L.push('时间：' + new Date().toLocaleString());
+    // v3.27.x：本行启动序号与错误条目 b 字段（id#N）对号——b 与本行不同＝旧启动残留
+    L.push('时间：' + new Date().toLocaleString() + '（本次启动 ' + BOOT_ID + '#' + BOOT_N + '）');
     L.push('');
     // v3.25.x：【更新状态】放最前——「TA 手机是不是旧缓存」是远端排障第一问。
     // 注意：L 是字符串数组，job 回调里改局部变量改不了已 push 的行，必须像
@@ -1213,10 +1249,14 @@
         readErrs(function (errs) {
           try {
             if (Array.isArray(errs) && errs.length) {
-              const lines = ['最近错误 ' + errs.length + ' 条（最多留 ' + ERR_CAP + ' 条，调用栈只给最近 ' + ERR_STACK_RECENT + ' 条——报障文本过长剪贴板会截断）：'];
+              const lines = ['最近错误 ' + errs.length + ' 条（最多留 ' + ERR_CAP + ' 条，调用栈只给最近 ' + ERR_STACK_RECENT + ' 条——报障文本过长剪贴板会截断；｛现场｝=报错那一刻视口几何）：'];
               errs.forEach(function (it, idx) {
                 const dt = it.t ? new Date(it.t).toLocaleString() : '?';
-                lines.push('· ' + dt + ' [' + (it.dev || '') + '] ' + (it.msg || '').slice(0, 180) + (it.page ? '（页面 ' + it.page + '）' : ''));
+                // v3.27.x：版本/启动序号/重复次数/案发视口现场——旧条目无这些字段时自然省略
+                lines.push('· ' + dt + (it.v ? ' [' + it.v + ']' : '') + ' [' + (it.dev || '') + (it.b ? ' 启动' + it.b : '') + '] '
+                  + (it.msg || '').slice(0, 180) + ((it.c || 1) > 1 ? ' ×' + it.c : '')
+                  + (it.page ? '（页面 ' + it.page + '）' : '')
+                  + (it.vp ? ' ｛' + it.vp + '｝' : ''));
                 // v3.25.x：带调用栈（只取前 4 行，够定位文件+行号又不刷屏）
                 // v3.26.x #100：环形放大到 20 条后，栈只跟最近 3 条（旧的 17 条各带
                 // 4 行栈会把正文撑成 100 行，用户粘贴时反被截断，得不偿失）
@@ -1969,6 +2009,29 @@ window.mochiViewportForm = function (sig) {
       add(false, '布局视口未贴底 ' + (diff - envTop) + 'px',
         '✗ screen−inner=' + diff + 'px 应≈状态栏高度 ' + envTop + 'px（#208：键盘收起后布局视口未还原，输入栏整体上移+底部白带；收起键盘或重开应用可临时恢复，复发请整段反馈）');
     }
+    // ⑤e v3.27.x：.phone 停靠残留（#209 同族的对号条目——键盘停靠已结束而内联
+    // height/alignSelf 未清=输入栏上移/下方灰边形态）。双端键盘探针均非活动、可视高
+    // 也无收缩证据才判；安卓悬浮键盘推定停靠（prov）期间内联合法，计为键盘证据。
+    // #209 看门狗 1s 内会自动清扫，5s 监视/手动诊断仍见即清理链断裂或看门狗未生效。
+    if ((inp.phoneInlineH || inp.phoneAlignSelf) && inp.innerH) {
+      const kbAnyAct = !!(inp.kb && inp.kb.kbActive) || !!(inp.kbAnd && (inp.kbAnd.kbActive || inp.kbAnd.prov));
+      const vvShrunk = inp.vvH > 0 ? (inp.innerH - inp.vvH > 60) : false;
+      if (!kbAnyAct && !vvShrunk) {
+        add(false, '.phone 停靠残留',
+          '✗ 内联 height=' + (inp.phoneInlineH || '(无)') + ' alignSelf=' + (inp.phoneAlignSelf || '(无)') + '，但键盘已非活动且可视高无收缩（#209：停靠残留=输入栏上移/下方灰边；正常 1s 内被看门狗清扫，持续存在请整段反馈）');
+      }
+    }
+    // ⑤f v3.27.x：横向贴合（宽度轴此前零判定，#185 平板左右露白同族的对号条目）——
+    // .phone 宽应铺满 min(inner,vv)，留 8px 缝差容忍；#187 起平板默认也全宽铺满
+    // （无限宽豁免）。桌面 .phone 是居中手机壳属既定设计，非移动判定跳过。
+    if (inp.phoneW != null && inp.isMobileDev && inp.innerW) {
+      const expW = Math.min(inp.innerW, inp.vvW > 0 ? inp.vvW : inp.innerW);
+      const underW = Math.round(expW - inp.phoneW);
+      const overW = Math.round(inp.phoneW - expW);
+      if (underW > 8) add(false, '左右露白 ' + underW + 'px', '✗ .phone 宽 ' + inp.phoneW + 'px < 期望 ' + expW + 'px（横向未铺满；#187 起平板也应全宽，旧版限宽居中请更新）');
+      else if (overW > 8) add(false, '横向超出 ' + overW + 'px', '✗ .phone 宽 ' + inp.phoneW + 'px > 期望 ' + expW + 'px（横向溢出）');
+      else add(true, '横向贴合（.phone 宽=' + inp.phoneW + ' / 期望 ' + expW + '）');
+    }
     // ⑥ 关键类
     add(true, 'standalone=' + !!inp.standalone, inp.standalone ? '独立应用形态' : '浏览器形态（ios-pwa-standalone 不加为正常）');
     add(true, 'html 类：' + (inp.htmlClass || '(空)'));
@@ -1979,7 +2042,9 @@ window.mochiViewportForm = function (sig) {
     // 头区（截图同样含）→ 关一次再开「全屏模式」重新申请（#212 已修 enterFs 带
     // navigationUI:'hide'，旧版更新后需重开一次生效）。仅全屏态且无其他 ✗ 时输
     // 出——已有 ✗ 时以 ✗ 条目为准，避免噪声。
-    if (inp.fsActive && !F.some(function (f) { return !f.ok; })) {
+    // v3.27.x：加 isAndroid 门控——该现象是安卓 Chromium 系统层行为，iOS 无原生
+    // 全屏 API（走 .ios-fs-active 模拟），提示行对 iOS 用户纯噪声。
+    if (inp.fsActive && inp.andr && !F.some(function (f) { return !f.ok; })) {
       add(true, '※ 全屏态·页外留白提示', '若用户仍见顶端/边缘空白条，且空白位于手机挖孔/摄像头区（页面内容之外、截图同样含），属系统 letterbox：请关一次再开「全屏模式」重新申请全屏（#212：更新到新版后需重开一次生效）；此空白在页面坐标系之外，本诊断结构性无法检测。');
     }
     return F;
@@ -2043,6 +2108,15 @@ window.mochiViewportForm = function (sig) {
       envBottom: envBottomProbe(),
       vvOffTop: vv ? Math.round(vv.offsetTop) : 0,
       vvOffLeft: vv ? Math.round(vv.offsetLeft) : 0,
+      // v3.27.x：⑤f 横向贴合 + ⑤e 停靠残留判定的信号——宽度轴此前零判定（#185
+      // 平板左右露白族无对号条目），停靠残留此前只有执行器侧看门狗在修、诊断无条目
+      phoneW: pr ? Math.round(pr.width) : null,
+      phoneInlineH: ph ? (ph.style.height || '') : '',
+      phoneAlignSelf: ph ? (ph.style.alignSelf || '') : '',
+      tablet: d.classList.contains('tablet'),
+      isMobileDev: (function () { try { return !!(window.mochiDevice && window.mochiDevice.isMobile); } catch (e) { return false; } })(),
+      andr: (function () { try { return !!(window.mochiDevice && window.mochiDevice.isAndroid); } catch (e) { return false; } })(),
+      kbAnd: (function () { try { var k2 = window.__mochiAndroidKb ? window.__mochiAndroidKb() : null; return k2 ? { kbActive: !!k2.kbActive, prov: !!k2.prov } : null; } catch (e) { return null; } })(),
       // v3.26.x #208：全屏页（聊天/朋友圈等 .page.full）打开时 tabs.js 给 .tabbar
       // 挂 hidden（display:none）——矩形全 0，原样返回会判「底部导航栏悬空
       // 860px」：用户在聊天页期间每 5s 自动采集刷一条假错误进错误环（实测
@@ -2057,12 +2131,21 @@ window.mochiViewportForm = function (sig) {
     inp.force = (function () { try { return localStorage.getItem('xy-home-v2:__safe-top-force') === '1'; } catch (e) { return false; } })();
     return inp;
   }
-  function collectScreenDiag() {
+  function collectScreenDiag(remoteTs) {
     const inp = collectFitInp();
     const F = screenDiagJudge(inp);
     const L = [];
     L.push('【屏幕适配诊断】' + (sdVerCache || '(版本未采集)'));
     L.push('时间：' + new Date().toLocaleString());
+    // v3.27.x：版本链路比对（仅手动诊断传入 remoteTs 时输出；自动监视 undefined
+    // 跳过不拉网络）——#215 实锤「存量旧版未送达修复」是症状大半来源，先更新再测
+    if (remoteTs !== undefined) {
+      const lm = /ts=(\d+)/.exec(sdVerCache || '');
+      const lts = lm ? +lm[1] : 0;
+      if (remoteTs && lts && remoteTs > lts + 60000) L.push('⚠ 版本链路：远端比本机新（远端 ts=' + remoteTs + ' / 本机 ts=' + lts + '）——建议先更新再测，症状可能已在新版修复');
+      else if (remoteTs && lts) L.push('版本链路：本机已是最新（ts=' + lts + '）');
+      else L.push('版本链路：无法比对（远端获取失败或本机 ts 未采集）');
+    }
     L.push('');
     L.push('== 基础 ==');
     L.push('屏幕=' + inp.screenW + '×' + inp.screenH + '  DPR=' + inp.dpr);
@@ -2082,6 +2165,12 @@ window.mochiViewportForm = function (sig) {
     L.push('');
     L.push('== 自动判定 ==');
     F.forEach(f => L.push((f.ok ? '✓ ' : '✗ ') + f.name + (f.detail ? '\n    ' + f.detail : '')));
+    // v3.27.x：机读签名行——用户整段复制，开发者可脚本解析对号/录 verify 台账；
+    // 键序固定勿动（下游脚本按名取值）
+    let sigForm = '';
+    try { sigForm = (window.mochiViewportForm({ standalone: !!inp.standalone, envTop: inp.envTop, innerH: inp.innerH, screenH: inp.screenH, iosMajor: inp.iosMajor, safeTopForce: !!inp.force }) || {}).form || ''; } catch (eS) {}
+    const sig = { v: sdVerCache, form: sigForm, scale: inp.scale, env: inp.envTop, varTop: inp.varTop, diff: inp.diff, innerW: inp.innerW, innerH: inp.innerH, vvH: inp.vvH, screenH: inp.screenH, phoneW: inp.phoneW, phoneH: inp.phoneH, phoneBottom: inp.phoneBottom, sb: inp.sbTop, tab: inp.tabBottom, iosH: inp.iosH, dpr: inp.dpr, standalone: !!inp.standalone, fs: !!inp.fsActive, andr: !!inp.andr, tablet: !!inp.tablet, ori: inp.orientation, bad: F.filter(function (f) { return !f.ok; }).map(function (f) { return f.name; }) };
+    L.push('SIG ' + JSON.stringify(sig));
     L.push('');
     L.push('※ 发给开发者时请整段复制（含 ✗ 条目），可精准对号修复。');
     return { text: L.join('\n'), findings: F, inp: inp };
@@ -2089,23 +2178,41 @@ window.mochiViewportForm = function (sig) {
   function bindScreenDiag() {
     const row = document.getElementById('row-screen-diag');
     if (!row) return;
+    // v3.27.x：手动诊断前先拉一次远端 version.json（2.5s 超时，失败不阻塞采集），
+    // 供「先更新再测」版本链路比对
+    function sdRemoteTs() {
+      return new Promise(function (res) {
+        let done = false;
+        const fin = function (v) { if (!done) { done = true; res(v); } };
+        try {
+          fetch('version.json?t=' + Date.now(), { cache: 'no-store' }).then(function (r2) {
+            if (!r2 || !r2.ok) return fin(null);
+            return r2.json().then(function (j) { var t = Number(j && j.ts); fin(t > 0 ? t : null); }).catch(function () { fin(null); });
+          }).catch(function () { fin(null); });
+        } catch (e1) { fin(null); }
+        try { setTimeout(function () { fin(null); }, 2500); } catch (e2) {}
+      });
+    }
     row.addEventListener('click', function () {
       sdToast('正在采集屏幕适配数据…');
-      setTimeout(function () {
-        let r = null;
-        try { r = collectScreenDiag(); } catch (e) { r = null; }
-        if (!r) { sdToast('采集失败'); return; }
-        // #176：本次快照存档（trig=manual），报告末尾附与上次的历史对比
-        // #209：附全部历史快照时间线（✗ 事件带信号数值）——用户报障常在事发后很久，
-        // 自动监视存下的「出问题那一刻」直接随报告带出，不用复现
-        r.text += '\n== 历史对比 ==\n' + sdHistCompare(r.inp);
-        r.text += '\n' + sdHistTimeline();
-        sdArchive(r, 'manual');
-        if (window.openModal) {
-          window.openModal('屏幕适配诊断', r.text, null, { noInput: true, textarea: true, textareaRows: 16, big: true });
-        }
-        sdCopy(r.text).then(function (ok) { sdToast(ok ? '报告已复制到剪贴板，可直接发给开发者' : '报告已弹出，请手动全选复制'); });
-      }, 60);
+      const t0 = Date.now();
+      sdRemoteTs().then(function (remoteTs) {
+        setTimeout(function () {
+          let r = null;
+          try { r = collectScreenDiag(remoteTs); } catch (e) { r = null; }
+          if (!r) { sdToast('采集失败'); return; }
+          // #176：本次快照存档（trig=manual），报告末尾附与上次的历史对比
+          // #209：附全部历史快照时间线（✗ 事件带信号数值）——用户报障常在事发后很久，
+          // 自动监视存下的「出问题那一刻」直接随报告带出，不用复现
+          r.text += '\n== 历史对比 ==\n' + sdHistCompare(r.inp);
+          r.text += '\n' + sdHistTimeline();
+          sdArchive(r, 'manual');
+          if (window.openModal) {
+            window.openModal('屏幕适配诊断', r.text, null, { noInput: true, textarea: true, textareaRows: 16, big: true });
+          }
+          sdCopy(r.text).then(function (ok) { sdToast(ok ? '报告已复制到剪贴板，可直接发给开发者' : '报告已弹出，请手动全选复制'); });
+        }, Math.max(0, 60 - (Date.now() - t0)));
+      });
     });
   }
   // ===== #176：快照存档 + 常驻监视 + 异常形态自动上报 =====
@@ -2135,7 +2242,15 @@ window.mochiViewportForm = function (sig) {
   function sdHistLoad() {
     try { const a = JSON.parse(localStorage.getItem(SD_HIST_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
   }
-  function sdHistSave(list) { try { localStorage.setItem(SD_HIST_KEY, JSON.stringify(list.slice(-SD_HIST_CAP))); } catch (e) {} }
+  function sdHistSave(list) {
+    try {
+      // v3.27.x：分级保留——坏快照（有 ✗）稀少且珍贵，纯 FIFO 会被后续好快照顶没
+      //（#209 K70：坏现场就一份）；坏/好各保底留最近 4 条，按时间排序落盘
+      const bads = list.filter(function (s) { return s.bad && s.bad.length; }).slice(-4);
+      const goods = list.filter(function (s) { return !(s.bad && s.bad.length); }).slice(-4);
+      localStorage.setItem(SD_HIST_KEY, JSON.stringify(bads.concat(goods).sort(function (a, b) { return a.t - b.t; })));
+    } catch (e) {}
+  }
   function sdSnapOf(r, trig) {
     const i = r.inp;
     return { t: Date.now(), trig: trig,
@@ -2143,6 +2258,7 @@ window.mochiViewportForm = function (sig) {
       scale: i.scale, envTop: i.envTop, varTop: i.varTop, diff: i.diff,
       screenH: i.screenH, vvH: i.vvH, standalone: !!i.standalone, force: !!i.force,
       innerW: i.innerW, innerH: i.innerH, phoneH: i.phoneH, phonePadTop: i.phonePadTop,
+      phoneW: i.phoneW, inlineH: i.phoneInlineH, aself: i.phoneAlignSelf,
       phoneBottom: i.phoneBottom, sbTop: i.sbTop, tabBottom: i.tabBottom, iosH: i.iosH,
       ori: i.orientation, fs: !!i.fsActive };
   }
@@ -2153,7 +2269,7 @@ window.mochiViewportForm = function (sig) {
     const list = sdHistLoad();
     if (!list.length) return '（无历史快照，本次已存档 baseline）';
     const prev = list[list.length - 1];
-    const keys = ['scale','envTop','varTop','diff','innerW','innerH','phoneH','phonePadTop','phoneBottom','sbTop','tabBottom','iosH','ori','fs'];
+    const keys = ['scale','envTop','varTop','diff','innerW','innerH','phoneW','phoneH','phonePadTop','phoneBottom','sbTop','tabBottom','iosH','ori','fs'];
     const ch = [];
     keys.forEach(function (k) {
       const a = prev[k], b = cur[k];
@@ -2178,13 +2294,20 @@ window.mochiViewportForm = function (sig) {
         ua: (navigator.userAgent || '').slice(0, 160),
         dev: (function () { var dd = window.mochiDevice || {}; return 'M' + (dd.isMobile?1:0) + ' T' + (dd.isTablet?1:0) + ' I' + (dd.isIOS?1:0) + ' A' + (dd.isAndroid?1:0) + ' V' + (dd.isVia?1:0); })(),
         page: 'page-phone' });
-      while (arr.length > 20) arr.shift();
+      // v3.27.x：上限 20→30，满时先逐出最旧的 [屏幕适配] 条目——本类条目与 JS
+      // onerror 同队列，此前纯 FIFO 会让屏幕适配爆发把真 JS 错误顶出环外。信息诊断
+      // pushErr 侧仍 slice(-20)：JS 错误到达时环自然收到 20，属正常 FIFO 不受影响。
+      while (arr.length > 30) {
+        var iSD = -1;
+        for (var i3 = 0; i3 < arr.length; i3++) { if (arr[i3] && /^\[屏幕适配\]/.test(arr[i3].msg || '')) { iSD = i3; break; } }
+        if (iSD < 0) arr.shift(); else arr.splice(iSD, 1);
+      }
       localStorage.setItem(SD_ERR_KEY, JSON.stringify(arr));
     } catch (e1) {}
   }
   // 常驻监视：仅 iOS 主屏幕/全屏形态才有意义？不只——浏览器形态同样适用（缩放/底裁）。
   // 每 5s 一次轻量采集；✗ 形态签名变化（出现/消失/换形态）才算一次事件。
-  let _sdLastBad = '';
+  let _sdLastBad = '', _sdPend = null;
   function sdTick() {
     try {
       if (document.visibilityState !== 'visible') return;
@@ -2196,11 +2319,17 @@ window.mochiViewportForm = function (sig) {
       const r = window.__collectScreenDiag();
       const badNames = r.findings.filter(function (f) { return !f.ok; }).map(function (f) { return f.name.split(' ')[0]; }).sort();
       const bad = badNames.join('|');
-      if (!bad) { _sdLastBad = ''; return; }
-      if (bad === _sdLastBad) return; // 形态未变化：不重复存档/上报
+      // v3.27.x：二次确认降噪——首见坏签名只存档（瞬态证据不丢，#208 iPad 切后台
+      // 单采样瞬态类）；同一签名连续两 tick（≥5s 持续）才入错误环。持续假态不受
+      // 影响（每 tick 都在等确认的那次已入环），只是入环推迟 5s。
+      if (!bad) { _sdLastBad = ''; _sdPend = null; return; }
+      if (bad === _sdLastBad) {
+        if (_sdPend && _sdPend.sig === bad) { sdRingPush(_sdPend.names, _sdPend.snap); _sdPend = null; }
+        return;
+      }
       _sdLastBad = bad;
       sdArchive(r, 'auto');
-      sdRingPush(badNames.join('、'), sdSnapOf(r, 'auto'));
+      _sdPend = { sig: bad, names: badNames.join('、'), snap: sdSnapOf(r, 'auto') };
     } catch (e2) {}
   }
   setInterval(sdTick, 5000);
@@ -2212,7 +2341,37 @@ window.mochiViewportForm = function (sig) {
   try { window.addEventListener('resize', sdEdge); } catch (e3) {}
   try { if (window.visualViewport) window.visualViewport.addEventListener('resize', sdEdge); } catch (e4) {}
   try { window.addEventListener('orientationchange', sdEdge); } catch (e5) {}
-  try { document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') sdEdge(); }); } catch (e6) {}
+  try { document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') sdEdge(); else window.__mochiLeaveSnap('hide'); }); } catch (e6) {}
+  try { window.addEventListener('pagehide', function () { window.__mochiLeaveSnap('hide'); }); } catch (e7) {}
+  // v3.27.x：离开抢拍——#209 K70 实锤「停靠残留只存在于切页前最后一帧」（切页
+  // syncChrome blur 即自愈），5s 轮询与事件沿都采不到。tabs.js 在把页面 hidden 之前、
+  // 以及上方 hidden/pagehide 时刻同步调本钩子：坏形态当场存档（trig=switch/hide），
+  // 好形态不存（切页高频，与监视同策略不刷档）；限频 3s。键盘会话/输入聚焦跳过
+  // （停靠中内联高合法，采了必误报，与 sdTick 同守卫）。
+  let _sdLeaveT = 0;
+  window.__mochiLeaveSnap = function (trig) {
+    try {
+      const now = Date.now();
+      if (now - _sdLeaveT < 3000) return;
+      if (!window.__collectScreenDiag) return;
+      // 只看双端键盘探针，不看 activeElement——#197 族「收键盘不派 blur」时
+      // activeElement 仍留在输入框，那正是要抓的残留现场，按焦点守卫必漏
+      try { var _k2 = window.__mochiIosKb ? window.__mochiIosKb() : null; if (_k2 && _k2.kbActive) return; } catch (eK3) {}
+      try { var _ka2 = window.__mochiAndroidKb ? window.__mochiAndroidKb() : null; if (_ka2 && (_ka2.kbActive || _ka2.prov)) return; } catch (eK4) {}
+      const r = window.__collectScreenDiag();
+      _sdLeaveT = now;
+      if (!r.findings.some(function (f) { return !f.ok; })) return;
+      sdArchive(r, trig === 'hide' ? 'hide' : 'switch');
+    } catch (e8) {}
+  };
+  // 微任务级兜底：本观察器随 device.js 注册（jsFiles 里最先），早于 tabs.js
+  // syncChrome 的观察器——同一 hidden 变更的微任务检查点里先执行＝blur 自愈前
+  // 现场；覆盖不经 tabs.js 的 JS 直切页（各模块 openXxx/返回）。与上面钩子共用
+  // 3s 限频，先到先采。
+  try {
+    const sdPgMo = new MutationObserver(function () { window.__mochiLeaveSnap('switch'); });
+    document.querySelectorAll('.page').forEach(function (p) { sdPgMo.observe(p, { attributes: true, attributeFilter: ['hidden'] }); });
+  } catch (e9) {}
   // #209：历史快照时间线文本（屏幕适配报告末尾附），新→旧
   function sdHistTimeline() {
     const list = sdHistLoad();
@@ -2223,7 +2382,8 @@ window.mochiViewportForm = function (sig) {
       T.push('· ' + new Date(h.t).toLocaleString() + ' [' + (h.trig || '?') + ']'
         + (h.bad && h.bad.length ? ' ✗' + h.bad.join('/') : ' ✓')
         + '  env=' + h.envTop + ' var=' + h.varTop + ' diff=' + h.diff + ' inner=' + h.innerH
-        + ' phone=' + h.phoneH + '(底' + h.phoneBottom + ') sb=' + h.sbTop + ' tab=' + h.tabBottom
+        + ' phone=' + h.phoneH + '(底' + h.phoneBottom + ' 宽' + (h.phoneW == null ? '?' : h.phoneW) + ')'
+        + ((h.inlineH || h.aself) ? ' ⚠内联残留' : '') + ' sb=' + h.sbTop + ' tab=' + h.tabBottom
         + ' scale=' + h.scale + (h.fs ? ' 全屏' : ''));
     }
     return T.join('\n');

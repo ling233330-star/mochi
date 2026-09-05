@@ -476,4 +476,60 @@
     } catch (e) {}
   }
   migrateMailMaxOld();
+
+  // ===== v3.27.x #218：互动频率引导提示（纯提醒，不改任何默认值） =====
+  // 背景：系统设置默认全开（设计如此，见开屏公告第八章），但总有用户觉得「概率太高」；
+  // 开关/概率集中在「设置 → 回复设置」，抱怨的用户不知道入口在哪。
+  // 方案：TA 主动消息 / 一次连发多条 / 互动邀请随机触发、且用户正看着聊天页时，弹一条
+  // 可点的提示条引导去回复设置自行调低或关闭。频控=每天最多一次（reply-guide-day 存当日
+  // 日期，同日重复触发静默；用户决策：不设总次数上限，一天一条不烦人），点过提示条或
+  // 手动进过回复设置页（row-general 点击）即永久关闭（reply-guide-done）。
+  // 触发点在 chat.js 三处一行调用 window.replyGuideHint(kind)；聊天页不可见时静默跳过、不占当日名额。
+  function rgToday() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function rgDone() {
+    try { return ls.get('reply-guide-done') === '1'; } catch (e) { return false; }
+  }
+  window.replyGuideHint = function (kind) {
+    try {
+      const pg = document.getElementById('page-chat');
+      if (!pg || pg.hidden) return;
+      if (rgDone()) return;
+      let shownDay = '';
+      try { shownDay = ls.get('reply-guide-day'); } catch (e) {}
+      if (shownDay === rgToday()) return; // 今天已弹过，同日不再打扰
+      try { ls.set('reply-guide-day', rgToday()); } catch (e) {}
+      let bar = document.getElementById('reply-guide-hint');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'reply-guide-hint';
+        bar.innerHTML = '<span class="rgh-txt"></span><span class="rgh-go">去调整</span>';
+        bar.addEventListener('click', () => {
+          try { ls.set('reply-guide-done', '1'); } catch (e) {}
+          clearTimeout(bar._rgT);
+          bar.classList.remove('show');
+          // 跳转：先点底部「设置」tab（tabs.js 接管页面显隐与高亮），再点「回复设置」入口行
+          const tab = document.querySelector('.tab[data-page="page-setting"]');
+          if (tab) tab.click();
+          const genRow = document.getElementById('row-general');
+          if (genRow) genRow.click();
+        });
+        document.body.appendChild(bar);
+      }
+      const txt = bar.querySelector('.rgh-txt');
+      if (txt) {
+        txt.textContent = kind === 'py' ? 'TA 一次连发多条是随机概率触发的，嫌频繁可在「设置 → 回复设置」调低或关闭'
+          : kind === 'inv' ? 'TA 的互动邀请是随机概率触发的，可在「设置 → 回复设置」调低或关闭'
+          : 'TA 的主动消息是随机概率触发的，嫌频繁可在「设置 → 回复设置」调低或关闭';
+      }
+      bar.classList.add('show');
+      clearTimeout(bar._rgT);
+      bar._rgT = setTimeout(() => { try { bar.classList.remove('show'); } catch (e) {} }, 12000);
+    } catch (e) {}
+  };
+  // 手动点开过回复设置页 = 用户已知道入口，不再弹提示
+  const rgGenRow = document.getElementById('row-general');
+  if (rgGenRow) rgGenRow.addEventListener('click', () => { try { ls.set('reply-guide-done', '1'); } catch (e) {} });
 })();

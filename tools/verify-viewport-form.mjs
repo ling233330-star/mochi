@@ -123,9 +123,14 @@ console.log('[C] 全屏页外留白提示');
       .replace(/\n  \}$/, '');
     const run = (inp) => Function('inp', 'window', `'use strict'; ${body}`)(inp, { mochiViewportForm: clf });
     // iQOO12 场景：全屏态页内全绿（挖孔屏 letterbox 在页面坐标系外测不到）→ 必出提示行
-    const fsGreen = { scale: 1, envTop: 0, varTop: 0, diff: 0, standalone: true, innerH: 894, screenH: 956, sbTop: null, phoneBottom: 894, fsActive: true, iosH: 894, iosMajor: 19, envBottom: 34, tabBottom: null };
+    // （v3.27.x #217 起提示行加 isAndroid 门控：现象是安卓 Chromium 系统层行为，
+    //   iOS 无原生全屏 API 提示行纯噪声——fixture 补 andr:true，iOS 不出提示另断言）
+    const fsGreen = { scale: 1, envTop: 0, varTop: 0, diff: 0, standalone: true, innerH: 894, screenH: 956, sbTop: null, phoneBottom: 894, fsActive: true, iosH: 894, iosMajor: 19, envBottom: 34, tabBottom: null, andr: true };
     let F = run({ ...fsGreen });
     ok(F.some(f => f.ok && f.name.indexOf('※ 全屏态·页外留白提示') === 0), '全屏态页内全绿 → 出页外 letterbox 提示行');
+    // iOS 全屏全绿 → 不出提示（#217 isAndroid 门控降噪）
+    F = run({ ...fsGreen, andr: false });
+    ok(!F.some(f => f.name.indexOf('※ 全屏态·页外留白提示') === 0), 'iOS 全屏 → 不出提示（#217 门控）');
     // 全屏但有 ✗（如 ios-h 与期望不符）→ 已有 ✗ 可对号，不出提示
     F = run({ ...fsGreen, iosH: 800 });
     ok(!F.some(f => f.name.indexOf('※ 全屏态·页外留白提示') === 0), '全屏态已有 ✗ → 不出提示（以 ✗ 对号为准）');

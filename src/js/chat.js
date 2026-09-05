@@ -3336,6 +3336,8 @@ const rpMin = Math.max(1, Number(c['reply-min']) || 1);
 const rpMax = Math.max(rpMin, Number(c['reply-max']) || 2);
 // #167 多字卡回复(py-en)是总开关：关闭时回复条数强制 1 条（关=彻底只回一条），开启才按「回复条数」拆条
 const count = (c['py-en'] === 1) ? randInt(rpMin, rpMax) : 1;
+// v3.27.x #218 互动频率引导：一次回多条=多字卡概率行为，提醒用户可自行调低/关闭（reply-settings.js 定义）
+if (count >= 2 && window.replyGuideHint) window.replyGuideHint('py');
 try { console.log('[mochi-reply] scheduleReply count=%s rpMin=%s rpMax=%s raw reply-min=%s reply-max=%s', count, rpMin, rpMax, c['reply-min'], c['reply-max']); window.__replyDiag = (window.__replyDiag||0)+1; window.__replyOnceDiag = 0; } catch(e){}
 const wantQuote = hit(c['quote-prob']) && !!quoteSrc;
 for (let i = 0; i < count; i++) {
@@ -3702,6 +3704,7 @@ const name = chatPartnerName();
 const inv = window.taInvitePickAny ? window.taInvitePickAny() : null;
 if (!inv || !inv.text) { toast('TA的邀请题库没有可用内容'); return false; }
 sendTaInvite(inv, name);
+if (window.replyGuideHint) window.replyGuideHint('inv'); // v3.27.x #218 互动频率引导（邀请半框弹出时提醒可调）
 return true;
 } catch (e) { return false; }
 };
@@ -3757,6 +3760,7 @@ if (!sameAutoCid()) return; // FIX #187
 hideTyping();
 const am = autoMsg();
 const m = addIn(am.text, { type: am.type, initiative: true, silent: i > 0 });
+if (i === 0 && window.replyGuideHint) window.replyGuideHint('as'); // v3.27.x #218 互动频率引导（首条主动消息落地时提醒可调）
 try { console.log('[mochi-auto] 主动发送消息: type=%s initiative=true', am.type); } catch(e){}
 if (hit(c['rc-prob'])) {
 setTimeout(() => {

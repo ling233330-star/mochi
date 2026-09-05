@@ -2,8 +2,13 @@
 (function () {
   const tabs = document.querySelectorAll('.tab');
   const pages = document.querySelectorAll('.page');
+  // v3.27.x：切页前抢拍钩子（device.js 屏幕适配监视注册 __mochiLeaveSnap）——
+  // syncChrome 的 blur 会在切页瞬间触发键盘残留自愈（#209 K70 实锤：停靠残留只
+  // 存在于切页前最后一帧），必须在 pages hidden 之前同步采集，晚了就是自愈后
+  const sdLeaveSnap = () => { try { if (window.__mochiLeaveSnap) window.__mochiLeaveSnap('switch'); } catch (e) {} };
   tabs.forEach(tab => {
     tab.addEventListener('click', () => {
+      sdLeaveSnap();
       tabs.forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
       pages.forEach(p => p.hidden = true);
@@ -42,12 +47,14 @@
   const themeBack = document.getElementById('theme-back');
   if (appearanceRow && themePage) {
     appearanceRow.addEventListener('click', () => {
+      sdLeaveSnap();
       pages.forEach(p => p.hidden = true);
       themePage.hidden = false;
     });
   }
   if (themeBack) {
     themeBack.addEventListener('click', () => {
+      sdLeaveSnap();
       pages.forEach(p => p.hidden = true);
       const setPage = document.getElementById('page-setting');
       if (setPage) setPage.hidden = false;
@@ -106,6 +113,8 @@
     if (stack.length <= 1) return;
     stack.pop();
     const target = stack[stack.length - 1];
+    // v3.27.x：返回键回退也是切页，hidden 前同样抢拍（本 IIFE 无 sdLeaveSnap 引用，直调钩子）
+    try { if (window.__mochiLeaveSnap) window.__mochiLeaveSnap('switch'); } catch (e) {}
     PAGES.forEach(p => { p.hidden = p.id !== target; });
     // v3.5.131：返回键回退页面时同步退出桌面装修模式（否则 editing 类残留，
     // 之后点 app 图标被 `if (editing) return` 静默吞掉，表现为"点了没反应"）

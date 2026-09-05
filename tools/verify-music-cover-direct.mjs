@@ -1,4 +1,4 @@
-// ===== #215 音乐封面直链化端到端验证 + #214 manifest theme_color =====
+// ===== #216 音乐封面直链化端到端验证 + #214 manifest theme_color =====
 // 用法：node build.mjs && node tools/verify-music-cover-direct.mjs
 // 覆盖（一加Ace3+Edge 报障「音乐封面丢失（新加的也是这样）」修复链路）：
 //   1) 存量代理封面迁移：库里/歌单/历史/TA收藏快照里 meting 图片代理 URL → 解析 302
@@ -223,14 +223,14 @@ try {
   }
   const byId = (id) => (lib || []).find(x => x.id === id) || {};
   const A = byId('sm_cv_a'), B = byId('sm_cv_b'), C = byId('sm_cv_c'), D = byId('sm_cv_d'), E = byId('sm_cv_e'), F = byId('sm_cv_f');
-  check('#215 存量代理封面迁移成直链（歌A）', A.cover === STUB_FINAL, String(A.cover).slice(0, 90));
-  check('#215 新加歌封面经 meting 解析直链（歌B）', B.cover === STUB_FINAL, String(B.cover).slice(0, 90));
-  check('#215 meting 挂走第二封面源+param 归一（歌C）', C.cover === 'https://p2.music.126.net/fakeenc==/777.jpg?param=300y300', String(C.cover).slice(0, 90));
-  check('#215 dataURI 封面不被误迁移（歌D）', D.cover === DATA_URI, String(D.cover).slice(0, 40));
+  check('#216 存量代理封面迁移成直链（歌A）', A.cover === STUB_FINAL, String(A.cover).slice(0, 90));
+  check('#216 新加歌封面经 meting 解析直链（歌B）', B.cover === STUB_FINAL, String(B.cover).slice(0, 90));
+  check('#216 meting 挂走第二封面源+param 归一（歌C）', C.cover === 'https://p2.music.126.net/fakeenc==/777.jpg?param=300y300', String(C.cover).slice(0, 90));
+  check('#216 dataURI 封面不被误迁移（歌D）', D.cover === DATA_URI, String(D.cover).slice(0, 40));
   // E：m.url 的 type=url 播放代理不得被动，同时缺封面会正常经 meting 补齐（非迁移路径）
-  check('#215 播放代理 URL 不动且封面正常补齐（歌E）', E.url === PLAY_PROXY_URL && E.cover === STUB_FINAL, 'url=' + String(E.url).slice(0, 50) + ' cover=' + String(E.cover || '').slice(0, 60));
+  check('#216 播放代理 URL 不动且封面正常补齐（歌E）', E.url === PLAY_PROXY_URL && E.cover === STUB_FINAL, 'url=' + String(E.url).slice(0, 50) + ' cover=' + String(E.cover || '').slice(0, 60));
   // F：cover 字段被人存成 type=url 播放代理（脏数据）——COVER_PROXY_RE 必须不认它
-  check('#215 type=url 播放代理不被当封面迁移（歌F 负例）', F.cover === PLAY_PROXY_URL, String(F.cover).slice(0, 60));
+  check('#216 type=url 播放代理不被当封面迁移（歌F 负例）', F.cover === PLAY_PROXY_URL, String(F.cover).slice(0, 60));
 
   // ---- 快照同步：历史/我的历史/TA收藏里歌A的代理封面一起换直链 ----
   const snaps = await evalJs(`(function(){
@@ -243,16 +243,16 @@ try {
     } catch (e) { return null; }
   })()`);
   const covOf = (arr, idKey, idVal) => { const x = (arr || []).find(y => y && y[idKey] === idVal) || {}; return x.cover || ''; };
-  check('#215 听歌记录快照同步直链', covOf(snaps && snaps.h, 'trackId', 'sm_cv_a') === STUB_FINAL, String(covOf(snaps && snaps.h, 'trackId', 'sm_cv_a')).slice(0, 90));
-  check('#215 我的历史快照同步直链', covOf(snaps && snaps.mh, 'trackId', 'sm_cv_a') === STUB_FINAL, String(covOf(snaps && snaps.mh, 'trackId', 'sm_cv_a')).slice(0, 90));
-  check('#215 TA收藏快照同步直链', covOf(snaps && snaps.ta, 'id', 'sm_cv_a') === STUB_FINAL, String(covOf(snaps && snaps.ta, 'id', 'sm_cv_a')).slice(0, 90));
-  check('#215 歌单代理封面迁移直链', covOf(snaps && snaps.pl, 'id', 'spl_v1') === STUB_FINAL, String(covOf(snaps && snaps.pl, 'id', 'spl_v1')).slice(0, 90));
+  check('#216 听歌记录快照同步直链', covOf(snaps && snaps.h, 'trackId', 'sm_cv_a') === STUB_FINAL, String(covOf(snaps && snaps.h, 'trackId', 'sm_cv_a')).slice(0, 90));
+  check('#216 我的历史快照同步直链', covOf(snaps && snaps.mh, 'trackId', 'sm_cv_a') === STUB_FINAL, String(covOf(snaps && snaps.mh, 'trackId', 'sm_cv_a')).slice(0, 90));
+  check('#216 TA收藏快照同步直链', covOf(snaps && snaps.ta, 'id', 'sm_cv_a') === STUB_FINAL, String(covOf(snaps && snaps.ta, 'id', 'sm_cv_a')).slice(0, 90));
+  check('#216 歌单代理封面迁移直链', covOf(snaps && snaps.pl, 'id', 'spl_v1') === STUB_FINAL, String(covOf(snaps && snaps.pl, 'id', 'spl_v1')).slice(0, 90));
 
   // ---- fetchLog：确认真实走到 meting 主源（B/C）与 detail 兜底（C）----
   const flog = await evalJs('JSON.stringify(window.__fetchLog || [])');
   let lg = []; try { lg = JSON.parse(flog || '[]'); } catch (e) {}
-  check('#215 主源请求发生（meting type=song ×2）', lg.filter(t => t.indexOf('meting-song:') === 0).length >= 2, lg.join(',').slice(0, 80));
-  check('#215 兜底请求发生（song/detail 代理）', lg.indexOf('info-detail') >= 0, lg.join(',').slice(0, 80));
+  check('#216 主源请求发生（meting type=song ×2）', lg.filter(t => t.indexOf('meting-song:') === 0).length >= 2, lg.join(',').slice(0, 80));
+  check('#216 兜底请求发生（song/detail 代理）', lg.indexOf('info-detail') >= 0, lg.join(',').slice(0, 80));
 
   // ---- UI：列表里歌A图标已带直链封面 ----
   const ui = await evalJs(`(function(){
@@ -260,7 +260,7 @@ try {
     if (!row) return 'norow';
     return (row.className || '') + '|' + (row.style.backgroundImage || '');
   })()`);
-  check('#215 列表图标显示直链封面', String(ui).indexOf('has-cov') >= 0 && String(ui).indexOf('/stub-cdn/cover.jpg') >= 0, String(ui).slice(0, 90));
+  check('#216 列表图标显示直链封面', String(ui).indexOf('has-cov') >= 0 && String(ui).indexOf('/stub-cdn/cover.jpg') >= 0, String(ui).slice(0, 90));
 
   // ---- 断网等异常不产生未处理 rejection 噪音（resolveCoverDirect 落地路径全 catch）----
   const jsErr = await evalJs('(window.__jsErrors || []).length');

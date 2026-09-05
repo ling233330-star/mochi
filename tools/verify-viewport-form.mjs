@@ -110,5 +110,30 @@ if (builtIdx) {
   console.log('  （index.html 未构建，跳过产物核对）');
 }
 
+// ===== C. 判定器全屏「页外 letterbox」盲区提示（#212 实证：iQOO12 诊断全绿但用户见顶带） =====
+console.log('[C] 全屏页外留白提示');
+{
+  const jm = device.match(/function screenDiagJudge\(inp\) \{[\s\S]*?\n  \}/);
+  ok(!!jm, 'screenDiagJudge 可提取');
+  if (jm) {
+    const clf = new Function(`'use strict';${cm[0].replace('window.mochiViewportForm = ', 'return ')}`)();
+    // 提取保留原生 const F/add/return F（#210 ⑦提示行内部引用 F——剥离式提取会断）
+    let body = jm[0]
+      .replace(/^function screenDiagJudge\(inp\) \{/, '')
+      .replace(/\n  \}$/, '');
+    const run = (inp) => Function('inp', 'window', `'use strict'; ${body}`)(inp, { mochiViewportForm: clf });
+    // iQOO12 场景：全屏态页内全绿（挖孔屏 letterbox 在页面坐标系外测不到）→ 必出提示行
+    const fsGreen = { scale: 1, envTop: 0, varTop: 0, diff: 0, standalone: true, innerH: 894, screenH: 956, sbTop: null, phoneBottom: 894, fsActive: true, iosH: 894, iosMajor: 19, envBottom: 34, tabBottom: null };
+    let F = run({ ...fsGreen });
+    ok(F.some(f => f.ok && f.name.indexOf('※ 全屏态·页外留白提示') === 0), '全屏态页内全绿 → 出页外 letterbox 提示行');
+    // 全屏但有 ✗（如 ios-h 与期望不符）→ 已有 ✗ 可对号，不出提示
+    F = run({ ...fsGreen, iosH: 800 });
+    ok(!F.some(f => f.name.indexOf('※ 全屏态·页外留白提示') === 0), '全屏态已有 ✗ → 不出提示（以 ✗ 对号为准）');
+    // 非全屏全绿 → 不出提示
+    F = run({ ...fsGreen, fsActive: false, sbTop: 12, tabBottom: 860 });
+    ok(!F.some(f => f.name.indexOf('※ 全屏态·页外留白提示') === 0), '非全屏 → 不出提示');
+  }
+}
+
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

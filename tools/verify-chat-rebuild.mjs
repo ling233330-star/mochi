@@ -8,7 +8,7 @@
 // 同一口径），常规收发走 renderMsg 增量追加。
 // 本脚本用 MutationObserver 给 #chat-body 的 childList 变动分类：removed≥50 且 added≥50 判为
 // 「整窗重建」；收发消息后 5s 内出现整窗重建=回归。历史长度 ≤200 条时重建分支本就不可达，
-// 因此种入 600 条历史再测（低于阈值场景无区分度）。
+// 种入大历史并夹带窗口外老格式数据（低于阈值/无迁移源场景无区分度）。
 // 用法：node build.mjs && node tools/verify-chat-rebuild.mjs
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -99,21 +99,24 @@ for (let i = 0; i < 40; i++) { if (await evalJs('!!window.__mochiDataReady')) br
 await evalJs("(function(){var e=document.getElementById('splash-enter');if(e&&!e.hidden)e.click();var s=document.getElementById('splash');if(s&&!s.classList.contains('hide')){s.classList.add('hide');s.hidden=true;}return true;})()");
 await sleep(800);
 
-// —— 种入 600 条历史（含 3 张小图），低于 RENDER_MAX 时重建分支不可达、无区分度 ——
+// —— 种入大历史：300 条×30KB≈9MB，账本 b 超 CHAT_LAZY_BYTES(8MB) → 冷启动跳过预读、
+//    进聊天页才读库 = 后台归一化在聊天页可见时收尾（真实用户大历史的闪动路径）。
+//    最旧 10 条为老格式（dataURL 无 type=迁移源），落在渲染窗口（最后 200 条）之外 ——
 const seeded = await evalJs(`(function(){
   if (!window.chatImportMsgs) return 'no-fn';
-  var arr=[];var t=Date.now()-600*60000;
+  var arr=[];var t=Date.now()-300*60000;
   var px='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAF0lEQVR4nGP8z8Dwn4GBgYGJgYGBAQAkBgMBOOSShwAAAABJRU5ErkJggg==';
-  for(var i=0;i<600;i++){
-    if(i%200===100) arr.push({side:'in',type:'image',text:px,ts:t+i*60000});
-    else arr.push({side:i%2?'in':'out',type:'text',text:'历史消息'+i,ts:t+i*60000});
+  var pad='';for(var p=0;p<30000;p++)pad+='x';
+  for(var i=0;i<300;i++){
+    if(i<10) arr.push({side:'in',text:px,ts:t+i*60000});
+    else arr.push({side:i%2?'in':'out',type:'text',text:'历史消息'+i+pad,ts:t+i*60000});
   }
   return String(window.chatImportMsgs(arr));
 })()`);
-ok(seeded === 'true', 'S0 种入 600 条历史（chatImportMsgs）', String(seeded));
-await sleep(1500);
+ok(seeded === 'true', 'S0 种入 300 条×30KB≈9MB 历史（懒读门槛上）+最旧 10 条老格式', String(seeded));
+await sleep(3000);
 
-// —— 冷启动：刷新（IDB 已有 600 条），进桌面 ——
+// —— 冷启动：刷新（IDB 已有大历史），进桌面 ——
 await cdp('Page.navigate', { url: baseUrl + '/index.html' });
 await sleep(2500);
 for (let i = 0; i < 40; i++) { if (await evalJs('!!window.__mochiDataReady')) break; await sleep(300); }
@@ -140,7 +143,7 @@ ok(armRes === 'ok', 'S1 观测器安装（#chat-body）', String(armRes));
 
 // —— S2 打开聊天：静置 6s，除首屏渲染外不得出现整窗重建（读库收尾 changed 才重建，常态无改动不应闪）——
 await evalJs('window.__vcrArm(); window.enterChat(); true');
-await sleep(6000);
+await sleep(10000);
 let evs = await evalJs('JSON.stringify(window.__vcr.events)') || '[]';
 let evArr = JSON.parse(evs);
 const rebuildsOf = (arr) => arr.filter(e => e.rem >= 50 && e.add >= 50);
@@ -161,6 +164,11 @@ evs = await evalJs('JSON.stringify(window.__vcr.events)') || '[]';
 evArr = JSON.parse(evs);
 ok(rebuildsOf(evArr).length === 0, 'S3 对方回复不整窗重建（#211 核心）', JSON.stringify(rebuildsOf(evArr)));
 ok(evArr.some(e => e.add >= 1 && e.add <= 3 && e.rem === 0), 'S3 回复走增量追加（add 1~3/rem 0）', evs.slice(0, 200));
+
+// —— S5 归一化迁移真实发生（type 已被后台迁移补上）但零重建=S2 断言非空转——
+await evalJs('window.__vcrArm(); true');
+const m0type = await evalJs('(window.getChatMsgs && window.getChatMsgs()[0] && window.getChatMsgs()[0].type) || "?"');
+ok(m0type === 'image', 'S5 老格式消息已被后台归一化迁移（type 补上）', String(m0type));
 
 // —— S4 自己发送消息：同样不得整窗重建 ——
 await evalJs('window.__vcrArm(); window.chatSendMsg("我自己发的一条测试消息"); true');

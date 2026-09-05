@@ -1972,6 +1972,16 @@ window.mochiViewportForm = function (sig) {
     // ⑥ 关键类
     add(true, 'standalone=' + !!inp.standalone, inp.standalone ? '独立应用形态' : '浏览器形态（ios-pwa-standalone 不加为正常）');
     add(true, 'html 类：' + (inp.htmlClass || '(空)'));
+    // ⑦ v3.26.x #212：全屏「页外 letterbox」盲区提示——挖孔屏安卓 Chromium 的
+    // Fullscreen 默认 navigationUI:'auto' 不把全屏面铺到挖孔区，页面外系统层
+    // letterbox 露一条空白，而页面坐标系内一切测量全 ✓（iQOO12 实证：诊断全绿
+    // 但用户见顶带）。页内判定结构性测不到页外空白，只能引导：空白在挖孔/摄像
+    // 头区（截图同样含）→ 关一次再开「全屏模式」重新申请（#212 已修 enterFs 带
+    // navigationUI:'hide'，旧版更新后需重开一次生效）。仅全屏态且无其他 ✗ 时输
+    // 出——已有 ✗ 时以 ✗ 条目为准，避免噪声。
+    if (inp.fsActive && !F.some(function (f) { return !f.ok; })) {
+      add(true, '※ 全屏态·页外留白提示', '若用户仍见顶端/边缘空白条，且空白位于手机挖孔/摄像头区（页面内容之外、截图同样含），属系统 letterbox：请关一次再开「全屏模式」重新申请全屏（#212：更新到新版后需重开一次生效）；此空白在页面坐标系之外，本诊断结构性无法检测。');
+    }
     return F;
   }
   let _sdEnvCache = -1, _sdEnvOri = ''; // #176：env 探针缓存（按横竖屏失效）

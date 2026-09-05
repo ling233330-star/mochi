@@ -80,13 +80,11 @@ console.log('[C] screenDiagJudge 判定器');
   ok(!!m, 'screenDiagJudge 可提取');
   if (m) {
     const clf = cm ? new Function(`'use strict';${cm[0].replace('window.mochiViewportForm = ', 'return ')}`)() : null;
+    // 提取保留原生 const F/add/return F（#210 ⑦提示行内部引用 F——剥离式提取会断）
     let body = m[0]
       .replace(/^function screenDiagJudge\(inp\) \{/, '')
-      .replace(/\n  \}$/, '')
-      .replace(/^\s*const F = \[\];/, '')
-      .replace(/^\s*const add = \(ok, name, detail\) => F\.push\(\{ ok: !!ok, name: name, detail: detail \|\| '' \}\);/, '')
-      .replace(/\n\s*return F;\s*$/, '');;
-    const run = (inp) => Function('inp', 'window', `'use strict'; const OUT=[]; const add=(ok,name,detail)=>OUT.push({ok:!!ok,name:name,detail:detail||''}); ${body} return OUT;`)(inp, { mochiViewportForm: clf });
+      .replace(/\n  \}$/, '');
+    const run = (inp) => Function('inp', 'window', `'use strict'; ${body}`)(inp, { mochiViewportForm: clf });
     // 苹果17 实机基态：iPhone17 / iOS18.7 standalone 全屏，inner 894 / screen 956 / env 62
     const base = { scale: 1, envTop: 62, varTop: 0, diff: 62, standalone: true, innerH: 894, screenH: 956, sbTop: 12, phoneBottom: 894, fsActive: true, iosH: 894, iosMajor: 18, envBottom: 34, tabBottom: 860, kb: { kbActive: false, fullInner: 894, fullVv: 894 } };
     let F = run({ ...base });

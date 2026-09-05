@@ -477,6 +477,35 @@
   // fetchNeteaseInfo 的 pic 字段依赖失效的 CORS 代理拿不到。改用 meting type=song
   // 接口（与播放同源的 api.injahow.cn，大陆直连、无 CORS、移动端同样可用）返回的
   // pic 代理 URL（302 → https 图片 CDN），img 直接引用即可显示。
+  // v3.26.x #215：封面 URL 归一——网易 CDN 直链去掉旧 param 统一 ?param=300y300
+  //（300px 对列表图标/正在播放封面/小组件都够用，原图 1~2MB 太重）；仅网易域名收
+  // https+param，其余域名原样返回（混合内容场景下 http 输入本来就走不到重定向）。
+  function normNeteaseCoverUrl(u) {
+    var s = String(u || '');
+    if (!/^https?:\/\/([^/]+\.)?music\.126\.net\//i.test(s)) return s;
+    return s.replace(/^http:\/\//i, 'https://').replace(/\?.*$/, '') + '?param=300y300';
+  }
+  // v3.26.x #215：把封面 URL（meting 图片代理或网易直链）解析成最终直链。
+  // 代理 URL 是 302 → 网易 CDN，两跳都有 CORS（ACAO:* 实测），fetch 的 r.url 即
+  // 最终直链；解析失败原样回退入参（宁用代理也不空着）。收到响应头即落地，
+  // 异步 abort+cancel body（同 resolveNeteaseDirectUrl 口径，防 BodyStreamBuffer
+  // was aborted 未处理 rejection 刷诊断错误环——一加Ace3+Edge 音乐页实测 3 条）。
+  function resolveCoverDirect(url, cb) {
+    var controller;
+    try { controller = new AbortController(); } catch (e) { controller = null; }
+    var timer = setTimeout(function () { try { controller && controller.abort(); } catch (e) {} }, 8000);
+    fetch(url, controller ? { signal: controller.signal } : undefined)
+      .then(function (r) {
+        clearTimeout(timer);
+        var finalUrl = (r.ok || r.redirected) ? (r.url || '') : '';
+        setTimeout(function () {
+          try { controller && controller.abort(); } catch (e) {}
+          try { r.body && r.body.cancel && r.body.cancel(); } catch (e) {}
+          cb(finalUrl ? normNeteaseCoverUrl(finalUrl) : String(url));
+        }, 0);
+      })
+      .catch(function () { clearTimeout(timer); cb(String(url)); });
+  }
   function fetchNeteaseCover(id, cb) {
     let controller;
     try { controller = new AbortController(); } catch (e) { controller = null; }
@@ -488,11 +517,20 @@
         try {
           const j = JSON.parse(txt);
           const pic = (j && j[0] && j[0].pic) || '';
-          if (pic) { cb(String(pic).replace(/^http:\/\//i, 'https://')); return; }
+          // v3.26.x #215：pic 是 meting 图片代理 URL（第三方单点，代理响应慢/挂时新旧
+          // 封面一起丢——一加Ace3+Edge 实测）——解析成网易 CDN 直链再入库。
+          if (pic) { resolveCoverDirect(String(pic), cb); return; }
         } catch (e) {}
         cb(null);
       })
-      .catch(() => { clearTimeout(timer); cb(null); });
+      .catch(() => { clearTimeout(timer); fetchNeteaseCoverFallback(id, cb); });
+  }
+  // v3.26.x #215：meting 主源失败（超时/挂/被拦）的第二封面源——fetchNeteaseInfo
+  // 的多代理链里 song/detail 接口带 album.picUrl（网易 CDN 直链）；拿不到才认输。
+  function fetchNeteaseCoverFallback(id, cb) {
+    fetchNeteaseInfo(id, function (info) {
+      cb(info && info.pic ? normNeteaseCoverUrl(info.pic) : null);
+    });
   }
 
   // ================= 网易云歌单导入 =================
@@ -899,7 +937,14 @@
   function ensureSongCover(m) { enqueueCoverFetch(m); }
   function ensureMissingCovers() {
     // v3.26.x：只补已渲染（窗口化）歌曲的封面，避免对几千首歌发起网络请求导致 ERR_INSUFFICIENT_RESOURCES
-    libSongsFor(libFilter).slice(0, libRenderShown).forEach(m => { if (m && m.neteaseId && !m.cover) enqueueCoverFetch(m); });
+    libSongsFor(libFilter).slice(0, libRenderShown).forEach(m => {
+      if (!m) return;
+      if (m.neteaseId && !m.cover) enqueueCoverFetch(m);
+      // v3.26.x #215：已有封面但是代理 URL 的存量歌，顺路迁移成网易 CDN 直链
+      else if (m.cover && COVER_PROXY_RE.test(m.cover)) enqueueCovMig(m);
+    });
+    // v3.26.x #215：歌单封面同批迁移（歌单个数少，不窗口化）
+    playlists.forEach(pl => { if (pl && pl.cover && COVER_PROXY_RE.test(pl.cover)) enqueueCovMig(pl); });
   }
   // 局部刷新某首歌曲在列表/歌单面板里的封面图标（has-cov 与正常渲染一致，图标丢弃）
   function updateCoverUI(id) {
@@ -915,6 +960,53 @@
         }
       }
     });
+  }
+  // ================= 存量封面代理 URL 迁移（#215） =================
+  // v3.26.x #215：历史数据把封面存成 meting 图片代理 URL（第三方单点，挂了全部封面
+  // 一起丢）。只迁已渲染窗口内的歌 + 全部歌单，逐步解析成网易 CDN 直链写回；解析
+  // 失败原样保留，下次打开音乐页继续自愈。串行一条一条来，不与播放/时长探测抢带宽。
+  // in-flight 用 Set 记不落盘（_coverLoading 式布尔会随库序列化，中途退出卡 true 永不再补）。
+  var COVER_PROXY_RE = /^https?:\/\/api\.injahow\.cn\/meting\/\?[^]*type=pic/i;
+  const covMigInflight = new Set();
+  let covMigBusy = false;
+  const covMigQueue = [];
+  function enqueueCovMig(m) {
+    if (!m || !m.cover || !COVER_PROXY_RE.test(m.cover) || covMigInflight.has(m.id)) return;
+    covMigInflight.add(m.id);
+    covMigQueue.push(m);
+    runCovMig();
+  }
+  function runCovMig() {
+    if (covMigBusy) return;
+    const m = covMigQueue.shift();
+    if (!m) return;
+    covMigBusy = true;
+    resolveCoverDirect(m.cover, function (direct) {
+      covMigInflight.delete(m.id);
+      covMigBusy = false;
+      if (direct && direct !== m.cover && !COVER_PROXY_RE.test(direct)) {
+        m.cover = direct;
+        if (String(m.id).indexOf('spl_') === 0) savePlaylists(); else saveLibrarySoon();
+        syncSnapshotCovers(m.id, direct);
+        if (findTrack(m.id)) {
+          updateCoverUI(m.id);
+          if (m.id === currentId) setWidgetCover(m);
+        }
+      }
+      if (covMigQueue.length) runCovMig();
+    });
+  }
+  // v3.26.x #215：歌库迁移完顺带把历史/TA收藏快照里同一首歌的代理封面一起换成直链
+  //（快照冗余是 #99/v3.9.x 设计，只换 URL 不动结构）
+  function syncSnapshotCovers(sid, cov) {
+    let hch = false;
+    history.forEach(x => { if (x && x.trackId === sid && x.cover && COVER_PROXY_RE.test(x.cover)) { x.cover = cov; hch = true; } });
+    myHistory.forEach(x => { if (x && x.trackId === sid && x.cover && COVER_PROXY_RE.test(x.cover)) { x.cover = cov; hch = true; } });
+    if (hch) { saveHistory(); saveMyHistory(); }
+    let tch = false;
+    const tl = taFavList();
+    tl.forEach(x => { if (x && x.id === sid && x.cover && COVER_PROXY_RE.test(x.cover)) { x.cover = cov; tch = true; } });
+    if (tch) saveTaFavList(tl);
   }
   // 串行导入多个歌单（避免并发刷爆网络）
   function importPlaylistIds(ids, cb, targetPl) {
@@ -2545,7 +2637,9 @@
     if (m) m._httpsRetried = false;
     currentId = id;
     // v3.9.x：播放时顺带补封面（列表/小组件缺封面的网易云歌曲）
-    ensureSongCover(m);
+    // v3.26.x #215：已有代理封面的顺路迁移成网易 CDN 直链
+    if (m && m.cover) { if (COVER_PROXY_RE.test(m.cover)) enqueueCovMig(m); }
+    else ensureSongCover(m);
     teardownAudio();
     if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
     // v3.22.x：切歌瞬间立即同步所有音乐 UI（聊天悬浮小框 / 音乐页底部播放条 / 桌面
@@ -3080,6 +3174,8 @@
     // 没有歌曲封面时异步拉取（仅网易云链接歌曲，meting type=song；拉到后局部刷新，
     // 正在播放的歌曲由 ensureSongCover 内部再触发 setWidgetCover 更新小组件）
     if (m && m.neteaseId && !m.cover) ensureSongCover(m);
+    // v3.26.x #215：正在播放的歌封面还是代理 URL 的，顺路迁移成直链
+    else if (m && m.cover && COVER_PROXY_RE.test(m.cover)) enqueueCovMig(m);
   }
 
   // ================= 悬浮小框 =================

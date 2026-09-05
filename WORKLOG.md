@@ -8,12 +8,12 @@
 - [AI-B 域]（**改动文件：src/js/device.js（screenDiagJudge 尾加 ⑦ 提示行：仅 fsActive 且页内无其他 ✗ 时输出「※ 全屏态·页外留白提示」——挖孔/摄像头区 letterbox 在页面坐标系外、页内全绿无法检测（#212 iQOO12 实证），引导关开一次全屏重新申请；#212 会话 WORKLOG 所嘱落地）、tools/verify-viewport-form.mjs（+C 段 4 断言=53；并把 viewport-form/reserved-standalone/kb-stuck 三脚本的判定器提取器改为保留原生 const F/add/return F——⑦行内部引用 F，剥离式提取会 ReferenceError）、build.mjs（+1 哨兵，逻辑锚点=提示行输出条件）、FIX-REGRESSION.md（#210 行补 ④ 与断言数）**）。
 - 自验：node --check 过；verify-viewport-form 53/53、reserved-standalone 29/29、kb-stuck 26/26、fullscreen-ipad 25/25；--check-sentinels 444 全绿哑 0（构建前）；#211/#212/#214/#215 各会话脚本随本口构建复跑，结果见提交信息；tmp-211-fixed.html 系 #211 会话临时文件不入库。
 
-### 2026-09-06 01:1x（#215 华为P50E+Edge「我发送的聊天气泡里没有文字/文字消失了」：发送取值零兜底收口（跨域 chat.js）·本次会话不构建，构建权留 #210/#211/#212 会话收口时随库）
-- [AI-B 域·跨域改动 src/js/chat.js（AI-A 聊天域文件，理由：用户直接指派修复；发送/清空/守卫机制全在该文件内）]（**改动文件：src/js/chat.js（readSendText 发送取值兜底：innerText/textContent 双口径读空且最近输入快照新鲜（真实编辑<15s 且晚于上次清空）才启用恢复；clearChatInput/切桌面同步作废快照；防重发/防复活守卫零改动）、build.mjs（哨兵 +2 逻辑锚点）、FIX-REGRESSION.md（#215 行+设备索引 华为P50E）、tools/verify-chat-send-recover.mjs（新增 8 断言，无头端到端）**；构建状态：**未构建**——树内有 #211（chat.js 闪动收口）/#212（fullscreen.js 挖孔屏）实时在途，本条只改 src+台账，产物由在途构建者收口时随库打入；构建后请复跑 node tools/verify-chat-send-recover.mjs 应 8/8）。
+### 2026-09-06 01:1x（#215 华为P50E+Edge「我发送的聊天气泡里没有文字/文字消失了」：发送取值零兜底收口（跨域 chat.js）·已随 #210 联合收口批次构建（产物实测含本修），提交权在收口会话）
+- [AI-B 域·跨域改动 src/js/chat.js（AI-A 聊天域文件，理由：用户直接指派修复；发送/清空/守卫机制全在该文件内）]（**改动文件：src/js/chat.js（readSendText 发送取值兜底：innerText/textContent 双口径读空且最近输入快照新鲜（真实编辑<15s 且晚于上次清空）才启用恢复；clearChatInput/切桌面同步作废快照；防重发/防复活守卫零改动）、build.mjs（哨兵 +2 逻辑锚点）、FIX-REGRESSION.md（#215 行+设备索引 华为P50E）、tools/verify-chat-send-recover.mjs（新增 11 断言，无头端到端）**；构建状态：**树内产物经实测已含本修**（并行会话随后续构建随库打入，verify-chat-send-recover 复跑 11/11 全绿），提交权在并行收口会话）。
 - 需求：华为 P50E+Edge（Chromium 151，ABR-AL60）报「聊天里我发消息，我的气泡里没有文字，文字消失了」，用户明说其他设备型号也有；同批报障另有黑条（→#212 挖孔屏 letterbox 与 #209 键盘残留灰边家族）与 mj 回消息一弹一弹一闪一闪（→#211 整窗重建闪动 + 旧构建 pre-#206 尾巴回放重复）。
 - 根因（无头探针实锤，362×764/DPR3.375/EdgA151 UA）：Edge 点发送瞬间可能把输入栏未提交组合文本整体撕掉（composition cancel：DOM 清空且不派发任何 input/beforeinput）→ addMsg(input.innerText) 读空 → buildParts 为空 → 一条消息都不发、用户打的字静默消失。#115 防复活守卫管「内核迟到写回」，管不了「发送瞬间撕文本」——两向缺口。另：该用户设备构建 ts=1788613665382（=9412345 批次 21:07），早于 #205/#206/#209/#211/#212——媒体空白/黑条/闪动三症状大半是存量已知修复未送达（其诊断 version.json 获取失败=更新链路受网络限制）。
 - 方案：捕获阶段 input 事件维护 _mLastTyped 快照（手动全删即归空、真实清空/切桌面作废）；发送两入口（click/Enter）改走 readSendText；恢复条件三重收紧（双口径读空+晚于上次清空+15s 新鲜度）→ 正常路径/防重发/防复活守卫零改动，任何机型无感。
-- 验证：node --check 过；--check-sentinels 全绿哑 0；verify-chat-send-recover 在旧产物上 T1 正常发送/T3 手动删空不幻影/T4 隔次发送不复活 已绿、T2/T5 撕文本恢复/Enter 恢复 红（修复未构建，构建后应全绿）。
+- 验证：node --check 过；--check-sentinels 446 全绿哑 0（含本修 2 锚）；verify-chat-send-recover **11/11 全绿**（T2 撕文本恢复/T3 不幻影/T4 不复活/T5 Enter 路径/T6 #115 迟到写回语义保持全部实测过，正常路径零回归）。
 - 【给在途 #211/#212 会话】：chat.js 我只动了 8306~8345（readSendText/clearChatInput）与 8440 附近两个发送入口行，与你的 622~660 归一化渲染闸无文本重叠——如需 stash 隔离请 diff 核对两段都在（今日已两起 stash 恢复丢失事故）；编号占用：#211~#214 均已被并行会话占用，本修复顺延 #215。
 
 ### 2026-09-06 00:5x（#210 屏幕适配判定器同源化 + 异常抓拍补强：src/tools/文档全就绪·自验全绿；号段更正：原声明 #209 实为 #210；构建+联合提交与 #209 会话协调移交）

@@ -77,14 +77,12 @@ console.log('[C] screenDiagJudge 判定器');
   ok(!!m && !!cm, 'screenDiagJudge/判定器可提取');
   if (m && cm) {
     const clf = new Function(`'use strict';${cm[0].replace('window.mochiViewportForm = ', 'return ')}`)();
+    // 提取保留原生 const F/add/return F（#210 ⑦提示行内部引用 F——剥离式提取会断）
     let body = m[0]
       .replace(/^function screenDiagJudge\(inp\) \{/, '')
-      .replace(/\n  \}$/, '')
-      .replace(/^\s*const F = \[\];/, '')
-      .replace(/^\s*const add = \(ok, name, detail\) => F\.push\(\{ ok: !!ok, name: name, detail: detail \|\| '' \}\);/, '')
-      .replace(/\n\s*return F;\s*$/, '');;
+      .replace(/\n  \}$/, '');
     // 判定器经 window 参数注入（judge 体内 window.mochiViewportForm(...) 直达真实现）
-    const run = (inp) => Function('inp', 'window', `'use strict'; const OUT=[]; const add=(ok,name,detail)=>OUT.push({ok:!!ok,name:name,detail:detail||''}); ${body} return OUT;`)(inp, { mochiViewportForm: clf });
+    const run = (inp) => Function('inp', 'window', `'use strict'; ${body}`)(inp, { mochiViewportForm: clf });
     // 保留形态：phoneBottom=793 应判「底部贴合」；852 应判「底部超出」
     const base = { scale: 1, envTop: 59, varTop: 0, diff: 59, standalone: true, innerH: 793, screenH: 852, sbTop: 14, phoneBottom: 793, fsActive: false, iosMajor: 18 };
     let F = run({ ...base });

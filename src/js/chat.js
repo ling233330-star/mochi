@@ -77,7 +77,7 @@ try {
 draftImgs = [];
 renderDraft();
 } catch (e) {}
-try { if (input) input.value = ''; } catch (e) {}
+try { if (input) { input.value = ''; try { input._mLastTyped = ''; } catch (e2) {} } } catch (e) {} // #215 切桌面作废输入快照
 try { updateChatPartnerName(); } catch (e) {}
 try { fillAvatar('chat-user-av', 'cs-avatar-user'); fillAvatar('chat-partner-av', 'cs-avatar-partner'); } catch (e) {}
 try { if (window.applyContinueSayUI) window.applyContinueSayUI(); } catch (e) {}
@@ -622,10 +622,16 @@ function runDeferredNormalization() {
   try { myPre = window.activePrefix(); } catch (e) { myPre = ''; }
   if (myPre !== normPrefix) { normPrefix = null; return; }
   let idx = 0, changed = false;
+  // v3.26.x #211：记录归一化改动的最靠后下标与结构性删除数。收尾时若改动全部落在
+  // 当前渲染窗口之外（changedHi < renderStart），跳过整窗重建——renderWindow 会销毁
+  // 重建整个消息区（气泡+图片全部重建重新解码=肉眼可见闪一下），是「打开聊天偶尔
+  // 闪动」的第二来源（偶发＝仅当历史里存在待迁移数据时 finish 才走渲染）。屏上数据
+  // 真的变了仍整窗重渲；sysNick 清扫与相邻重复删除（下标位移）按保守整窗处理。
+  let changedHi = -1, removedAll = 0, sysNickChanged = false;
   const N = msgs.length;
   if (!N) { normPrefix = null; return; }
   const finish = () => {
-    try { if (sysNickCatchup()) changed = true; } catch (e) {}
+    try { sysNickChanged = !!sysNickCatchup(); changed = changed || sysNickChanged; } catch (e) {}
     normPrefix = null;
     if (!changed) return;
     // v3.26.x #88：未读到权威时不整包写回（同 saveMsgs 守卫）。归一化是幂等的，
@@ -638,15 +644,23 @@ function runDeferredNormalization() {
     try { if (window.idbSet) persistMsgsToIdb(myPre + ':chat-msgs', msgs); } catch (e) {}
     try { writeLsSnapshot(msgs, myPre, true); } catch (e) {}
     }
-    try { if (chatVisible() && msgs.length) { renderWindow(false, true); scrollChatBottom(); } } catch (e) {}
+    // #211：改动全部在渲染窗口之外时跳过整窗重建（防打开聊天闪一下）；屏上有改动才重渲
+    try {
+    if (chatVisible() && msgs.length &&
+    (sysNickChanged || removedAll > 0 || changedHi >= renderStart)) {
+    renderWindow(false, true);
+    scrollChatBottom();
+    }
+    } catch (e) {}
   };
   const tick = () => {
     let nowPre;
     try { nowPre = window.activePrefix(); } catch (e) { nowPre = ''; }
     if (nowPre !== normPrefix) { normPrefix = null; return; }
     const end = Math.min(N, idx + NORM_CHUNK);
-    for (let i = idx; i < end; i++) { if (normCell(msgs[i])) changed = true; }
-    if (normCollapseRange(idx, end + 1, msgs)) changed = true;
+    for (let i = idx; i < end; i++) { if (normCell(msgs[i])) { changed = true; changedHi = Math.max(changedHi, i); } }
+    const _rm = normCollapseRange(idx, end + 1, msgs);
+    if (_rm) { changed = true; removedAll += _rm; }
     if (end < N) { idx = end; setTimeout(tick, 0); }
     else finish();
   };
@@ -8314,10 +8328,32 @@ let lastSendTxt = '', lastSendTs = 0;
 // compositionstart / insert 类 beforeinput），内核的迟到写回没有。
 let lastUserEditAt = 0, clearAppliedAt = 0;
 function userEditedAfterClear() { return lastUserEditAt > clearAppliedAt; }
+// v3.26.x #215：发送取值兜底——Edge/Chromium 部分内核在点发送的瞬间会把输入栏里
+// 尚未提交的组合文本整体撕掉（composition cancel：DOM 直接清空、不派发任何
+// input/beforeinput 事件），addMsg(input.innerText) 读到空串 → buildParts 为空 →
+// 一条消息都不发出、用户刚打的字静默消失（华为 P50E+Edge 报「发消息气泡里没有
+// 文字/文字消失了」，用户明说其他设备型号也有；无头复现：IME 提交文本→零事件
+// 清空 DOM→点发送＝消息 0 条且字无踪）。#115 防复活守卫管「发送后内核迟到写回」，
+// 管不了「发送瞬间撕文本」这一反向缺口。恢复依据 = 捕获阶段维护的最近输入快照
+// _mLastTyped，仅在「innerText/textContent 两个口径都读空、且快照新鲜（真实编辑
+// 发生在 15s 内、晚于上次清空）」时启用；正常路径与防重发/防复活守卫零改动。
+function readSendText() {
+try {
+const t = (input.innerText || '').trim() || (input.textContent || '').trim();
+if (t) return t;
+} catch (e) {}
+try {
+const snap = (input._mLastTyped || '').trim();
+if (snap && userEditedAfterClear() && Date.now() - lastUserEditAt < 15000) return snap;
+} catch (e) {}
+return '';
+}
 function clearChatInput() {
 if (!input) return;
 // 先挂复活守卫再清空——清空动作本身会同步派发 input 事件，守卫需已就位
 input._mClearTxt = lastSendTxt || '';
+// v3.26.x #215：快照随真实清空一并作废（防隔次发送/跨联系人被旧快照幻影重发）
+try { input._mLastTyped = ''; } catch (e) {}
 clearAppliedAt = Date.now();
 const sentTxt = lastSendTxt || '';
 // v3.14.x：vivo Edge 等内核实测——聚焦中的 contenteditable 直写 textContent=''
@@ -8390,7 +8426,7 @@ if (send) {
 // v3.30.x：点发送不收输入法——点按按钮的 mousedown 默认把焦点从输入框抢走（移动端键盘随即收起），
 // preventDefault 阻止焦点转移；发送后回焦输入框兜底（部分内核 click 路径仍会失焦，见 FIX-REGRESSION #127）
 send.addEventListener('mousedown', (e) => { e.preventDefault(); });
-send.addEventListener('click', () => { addMsg(input.innerText); try { input.focus(); } catch (e) {} });
+send.addEventListener('click', () => { addMsg(readSendText()); try { input.focus(); } catch (e) {} });
 }
 // v3.17.x：删除了此前的 pointerup 监听——它在 click 之前把 lastSendTs 刷新为当前时间，
 // 使 addMsg 的防重发守卫（t0===lastSendTxt 且间隔<2.5s）对「用户重新输入相同文本后
@@ -8408,6 +8444,10 @@ input.addEventListener('compositionstart', () => { lastUserEditAt = Date.now(); 
 input.addEventListener('beforeinput', (e) => {
 if (!e || typeof e.inputType !== 'string' || e.inputType.indexOf('insert') === 0) lastUserEditAt = Date.now();
 }, true);
+// v3.26.x #215：最近输入快照（捕获阶段独立监听，守卫监听的 _mClearTxt 早退不影响它）——
+// 每次输入事件都刷新，含手动全删（快照归空＝不可能幻影恢复）；内核撕文本不发事件，
+// 撕掉前最后一次快照即恢复依据（见 readSendText）
+input.addEventListener('input', function () { try { input._mLastTyped = input.innerText || ''; } catch (e) {} }, true);
 } catch (e) {}
 input.addEventListener('input', () => {
 if (!input._mClearTxt) return;
@@ -8427,7 +8467,7 @@ if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
 // 聊天设置「回车键发送消息」关闭时不发送：不 preventDefault，安卓 ce-box 走原事件默认行为插入换行
 try { if (store.get('cs-enter-send') === 'off') return; } catch (err) {}
 e.preventDefault();
-addMsg(input.innerText);
+addMsg(readSendText());
 }
 });
 }

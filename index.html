@@ -9368,9 +9368,9 @@ transition-duration: .01ms !important;
     <!-- v3.8.y：底部统一装进一个卡片框（版本/加载/提示/按钮成一整体，与顶部品牌卡片呼应） -->
     <div class="splash-footcard">
       <!-- v3.8.y：底部版本块——两行：名称+版本 / 部署时间+实时秒数（实时秒写入 #splash-ver-live） -->
-      <div class="splash-ver" id="splash-ver" data-build-ts="1789281229357">
-        <span class="sv-app">Mochi 字卡传讯 <b>v3.26.630</b></span>
-        <span class="sv-deploy">部署于 2026-09-13 14:33<span id="splash-ver-live"></span></span>
+      <div class="splash-ver" id="splash-ver" data-build-ts="1789281574365">
+        <span class="sv-app">Mochi 字卡传讯 <b>v3.26.631</b></span>
+        <span class="sv-deploy">部署于 2026-09-13 14:39<span id="splash-ver-live"></span></span>
       </div>
       <!-- v3.5.120：数据（IndexedDB 回填）加载完成前不显示「点击进入」按钮，
            只显示加载提示；就绪后按钮才出现（clock.js 控制显隐） -->
@@ -10649,7 +10649,7 @@ transition-duration: .01ms !important;
           <div class="txt">清除本地数据</div>
         </div>
       </div>
-      <div class="ver">Mochi 字卡传讯 v3.26.630</div>
+      <div class="ver">Mochi 字卡传讯 v3.26.631</div>
       <div class="ver-credit">原版小红书@言序（1842523578）</div>
       <!-- v3.27.x：设置页底部防骗声明 -->
       <div class="set-alert">
@@ -10944,7 +10944,7 @@ transition-duration: .01ms !important;
             <div class="lic-hero-top">
               <div class="lic-title">Mochi 字卡传讯</div>
               <span class="lic-badge">原版</span>
-              <span class="lic-ver">v3.26.630</span>
+              <span class="lic-ver">v3.26.631</span>
             </div>
             <div class="lic-p">原创极简风情侣聊天模拟器：黑白灰简约设计，数据全部保存在本地、无需联网；所有内容均为代码触发、按概率运行，联系方可主动发送聊天消息。代码从零编写并完全开源——本作即原版。</div>
             <div class="lic-pills">
@@ -36251,14 +36251,14 @@ try { body.classList.add('scroll-anchor-auto'); } catch (err) {}
 body.addEventListener('touchend', (e) => {
 try {
 const dy = Math.abs(e.changedTouches[0].clientY - gcUnpinTsY);
-if (dy < 10 && nearGcBottom()) { gcUserGcScrollTouched = false; try { body.classList.remove('scroll-anchor-auto'); } catch (err) {} } // FIX #393 轻点回跟=回钉态摘锚定
+if (dy < 10 && nearGcBottom()) { gcUserGcScrollTouched = false; try { body.classList.remove('scroll-anchor-auto'); } catch (err) {} } // FIX #396 轻点回跟=回钉态摘锚定
 } catch (err) {}
 }, { passive: true });
 body.addEventListener('wheel', () => { gcUserGcScrollTouched = true; try { body.classList.add('scroll-anchor-auto'); } catch (err) {} }, { passive: true });
 function followGcBottom(force) {
 try {
 if (!force && gcUserGcScrollTouched) return;
-try { body.classList.remove('scroll-anchor-auto'); } catch (err) {} // FIX #393 回钉贴底关回锚定（#316 单聊同口径，防与 JS 显式滚动对打）
+try { body.classList.remove('scroll-anchor-auto'); } catch (err) {} // FIX #396 回钉贴底关回锚定（#316 单聊同口径，防与 JS 显式滚动对打）
 scrollToBottom();
 const rewrite = () => {
 try { if (!gcUserGcScrollTouched) scrollToBottom(); } catch (e) {}
@@ -36269,7 +36269,7 @@ gcUserGcScrollTouched = false;
 } catch (e) {}
 }
 body.addEventListener('scroll', () => {
-if (gcUserGcScrollTouched && nearGcBottom()) { gcUserGcScrollTouched = false; try { body.classList.remove('scroll-anchor-auto'); } catch (err) {} } // FIX #393 滚回贴底=回钉态摘锚定
+if (gcUserGcScrollTouched && nearGcBottom()) { gcUserGcScrollTouched = false; try { body.classList.remove('scroll-anchor-auto'); } catch (err) {} } // FIX #396 滚回贴底=回钉态摘锚定
 }, { passive: true });
 const GC_DOM_WINDOW = 400, GC_DOM_CUT = 320;
 function pruneGcDom() {
@@ -90927,4 +90927,4 @@ lastHeal: his
 <!-- __MOCHI_EOF__ -->
 </body>
 </html>
-<!-- __MOCHI_EOF__ mtzfugj1 -->
+<!-- __MOCHI_EOF__ mtzg1uql -->

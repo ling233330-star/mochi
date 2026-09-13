@@ -2267,7 +2267,7 @@ appendTarget = null;
 batchRendering = false;
 renderStart = newStart;
 if (preNum > 0 && anchor) {
-// FIX 2026-09-13 #393（红米 K80 Chrome 等多机型「聊天/群聊滑动屏幕会弹」）：旧补偿式
+// FIX 2026-09-13 #396（红米 K80 Chrome 等多机型「聊天/群聊滑动屏幕会弹」）：旧补偿式
 // beforeTop + anchor.offsetTop 读的是插入后首元素的 offsetTop＝插入高度 + .chat-body
 // padding-top，每批上翻固定把视口多推 14px＝视觉跳一下；锚定 auto（#316）只能兜住
 // 图片迟到解码那部分、兜不住这 14px（无头实测：Δsh=8903 补偿误差恒 -14px 视觉跳变）。

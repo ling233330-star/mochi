@@ -736,7 +736,7 @@
   body.addEventListener('touchstart', (e) => {
     try { gcUnpinTsY = e.touches[0].clientY; } catch (err) { gcUnpinTsY = 0; }
     gcUserGcScrollTouched = true;
-    // FIX 2026-09-13 #393：#316 只给单聊解钉开回了 Chromium 原生滚动锚定，gc-body 共享
+    // FIX 2026-09-13 #396：#316 只给单聊解钉开回了 Chromium 原生滚动锚定，gc-body 共享
     // .chat-body 的 overflow-anchor:none 却从未挂回 scroll-anchor-auto＝图多的群聊历史
     // 上翻时视口上方图片异步解码撑高无人补偿，看的内容被一次次推走＝「滑动屏幕会弹」
     // （红米 K80 Chrome 报障形态，与单聊 #316 同根因）。触摸/滚轮接管期挂类开回锚定，
@@ -746,7 +746,7 @@
   body.addEventListener('touchend', (e) => {
     try {
       const dy = Math.abs(e.changedTouches[0].clientY - gcUnpinTsY);
-      if (dy < 10 && nearGcBottom()) { gcUserGcScrollTouched = false; try { body.classList.remove('scroll-anchor-auto'); } catch (err) {} } // FIX #393 轻点回跟=回钉态摘锚定
+      if (dy < 10 && nearGcBottom()) { gcUserGcScrollTouched = false; try { body.classList.remove('scroll-anchor-auto'); } catch (err) {} } // FIX #396 轻点回跟=回钉态摘锚定
     } catch (err) {}
   }, { passive: true });
   body.addEventListener('wheel', () => { gcUserGcScrollTouched = true; try { body.classList.add('scroll-anchor-auto'); } catch (err) {} }, { passive: true });
@@ -755,7 +755,7 @@
       // FIX #378：跟底闸只看「用户是否手动接管滚动」——内核丢弃首写/迟到解码顶开后
       // 视口离底>150px，旧 nearGcBottom 闸会把后续每条来消息都误判成在看历史永不跟底
       if (!force && gcUserGcScrollTouched) return;
-      try { body.classList.remove('scroll-anchor-auto'); } catch (err) {} // FIX #393 回钉贴底关回锚定（#316 单聊同口径，防与 JS 显式滚动对打）
+      try { body.classList.remove('scroll-anchor-auto'); } catch (err) {} // FIX #396 回钉贴底关回锚定（#316 单聊同口径，防与 JS 显式滚动对打）
       scrollToBottom();
       const rewrite = () => {
         try { if (!gcUserGcScrollTouched) scrollToBottom(); } catch (e) {}
@@ -767,7 +767,7 @@
   }
   // FIX #378：用户手动滚回贴底＝解除接管，自动跟底恢复（旧口径解钉后无法恢复）
   body.addEventListener('scroll', () => {
-    if (gcUserGcScrollTouched && nearGcBottom()) { gcUserGcScrollTouched = false; try { body.classList.remove('scroll-anchor-auto'); } catch (err) {} } // FIX #393 滚回贴底=回钉态摘锚定
+    if (gcUserGcScrollTouched && nearGcBottom()) { gcUserGcScrollTouched = false; try { body.classList.remove('scroll-anchor-auto'); } catch (err) {} } // FIX #396 滚回贴底=回钉态摘锚定
   }, { passive: true });
   // v3.12.x：停留页内实时追加的 DOM 窗口上限——renderAll 只在进页时收窄到 RENDER_MAX，
   // 之后每条收发都走 renderMsg 直接 append，长时间泡在群里 DOM（含每条一个 dataURL 头像

@@ -886,8 +886,17 @@ return hm + ' inner:' + e.iw + '×' + e.ih + ' vv:' + e.vh + ' sc:' + e.sc + ' k
 };
 window.addEventListener('pageshow', onIosVvEvent);
 document.addEventListener('visibilitychange', onIosVvEvent);
+let _vvFp = '', _vvTick = 0;
 setInterval(function () {
 if (document.visibilityState !== 'visible') return;
+try {
+_vvTick++;
+const _v = window.visualViewport;
+const fp = [window.innerWidth, window.innerHeight, _v ? Math.round(_v.height) : 0,
+_v ? +(+_v.scale).toFixed(2) : 1, _v ? Math.round(_v.offsetTop || 0) : 0].join('|');
+if (fp === _vvFp && (_vvTick % 10) !== 0) return; // 未变且非深查拍 → 本秒不重校
+_vvFp = fp;
+} catch (e0) {}
 onIosVvEvent();
 }, 1000);
 try { syncVvFit(); syncSafeBottom(); } catch (e) {}
@@ -1868,8 +1877,10 @@ var origGet = st.getPropertyValue.bind(st);
 function lsSet(k, v) { try { if (v) localStorage.setItem(PFX + KEYS[k], String(v)); else localStorage.removeItem(PFX + KEYS[k]); } catch (e) {} }
 function applyBottom() {
 try {
-if (adj.bottom) origSet('--mochi-safe-bottom', 'calc(env(safe-area-inset-bottom, 0px) + ' + adj.bottom + 'px)');
-else if (origGet('--mochi-safe-bottom').indexOf('calc(env(') === 0) origRemove('--mochi-safe-bottom');
+const want = adj.bottom ? ('calc(env(safe-area-inset-bottom, 0px) + ' + adj.bottom + 'px)') : '';
+const cur = origGet('--mochi-safe-bottom') || '';
+if (want) { if (cur !== want) origSet('--mochi-safe-bottom', want); }
+else if (cur.indexOf('calc(env(') === 0) origRemove('--mochi-safe-bottom');
 } catch (e) {}
 }
 function applyDesk() {

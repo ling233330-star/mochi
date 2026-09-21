@@ -1517,8 +1517,21 @@
       };
       window.addEventListener('pageshow', onIosVvEvent);
       document.addEventListener('visibilitychange', onIosVvEvent);
+      // #969：原来是「每秒无条件重校视口」——healViewport 要读 .phone/visualViewport 几何并写样式，
+      // 在 1.6 万节点页面上等于每秒一次强制布局＋样式失效，是 iOS 常驻卡顿的稳定来源之一。
+      // 改为指纹闸：视口指纹（inner/可视高/缩放/平移）没变就跳过，省掉整条重校链；
+      // 每第 10 拍仍无条件深查一次（防「指纹没变但内联样式被外部改坏」这类需要自愈的情况）。
+      let _vvFp = '', _vvTick = 0;
       setInterval(function () {
         if (document.visibilityState !== 'visible') return;
+        try {
+          _vvTick++;
+          const _v = window.visualViewport;
+          const fp = [window.innerWidth, window.innerHeight, _v ? Math.round(_v.height) : 0,
+            _v ? +(+_v.scale).toFixed(2) : 1, _v ? Math.round(_v.offsetTop || 0) : 0].join('|');
+          if (fp === _vvFp && (_vvTick % 10) !== 0) return; // 未变且非深查拍 → 本秒不重校
+          _vvFp = fp;
+        } catch (e0) {}
         onIosVvEvent();
       }, 1000);
       try { syncVvFit(); syncSafeBottom(); } catch (e) {}
@@ -3089,8 +3102,13 @@
   function lsSet(k, v) { try { if (v) localStorage.setItem(PFX + KEYS[k], String(v)); else localStorage.removeItem(PFX + KEYS[k]); } catch (e) {} }
   function applyBottom() {
     try {
-      if (adj.bottom) origSet('--mochi-safe-bottom', 'calc(env(safe-area-inset-bottom, 0px) + ' + adj.bottom + 'px)');
-      else if (origGet('--mochi-safe-bottom').indexOf('calc(env(') === 0) origRemove('--mochi-safe-bottom');
+      // #969：底部补偿的 1s 轮询原为「每秒无条件重写一次 CSS 变量」——写自定义属性会让整棵
+      // 样式失效并触发重算/重绘，在长页面上是稳定的每秒开销。改为「当前值已是目标值就不写」
+      // （读仍在，保留「被外部 removeProperty 掉后 1s 内补回」的自愈职责不变）。
+      const want = adj.bottom ? ('calc(env(safe-area-inset-bottom, 0px) + ' + adj.bottom + 'px)') : '';
+      const cur = origGet('--mochi-safe-bottom') || '';
+      if (want) { if (cur !== want) origSet('--mochi-safe-bottom', want); }
+      else if (cur.indexOf('calc(env(') === 0) origRemove('--mochi-safe-bottom');
     } catch (e) {}
   }
   // #707 桌面图标区轴：独立写 --mochi-desk-adj（home.css 的 #desktop-pages padding-top 消费）——

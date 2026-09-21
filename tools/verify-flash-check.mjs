@@ -16,7 +16,10 @@
 //   B4 探针自证（防哑）：同值重写／必要写／空删变量／空摘 cs-* 类／cs-* 样式表拆建 逐项计得到
 //   B5 真点四下＝核心判别面：值没变那一下全站零翻动零白写（--red 还原 #938 修前形态后必然红在这里），
 //      且真换档照常写入并生效（防修过头）｜B6 报告弹窗＋浮条回显＋落盘键｜B7 【结束】零残留
-//   B8 全程只读：改动的存储键只允许「抽屉档位本身」与 flash-check-last｜Z 零 JS 异常
+//   B8 全程只读：改动的存储键只允许「抽屉档位本身」与 flash-check-last
+//   W（#1015 长窗口「边用边测」）：W1 窗口态在位｜W2 无操作翻动判得出（静置 >400ms 的自己动手＝1 次，
+//      紧接着操作的翻动不算）｜W3 到点自动出报告并摘净探针｜W4 报告含长窗口段与结论｜W5 长窗口轮不再
+//      训「你没点档位」｜W6 只读边界不变｜Z 零 JS 异常
 // 用法：
 //   node tools/verify-flash-check.mjs            # 当前源码（GREEN）
 //   node tools/verify-flash-check.mjs --red      # 把 chat-settings.js 的 setVar/delVar 还原成 #938 修前
@@ -227,6 +230,16 @@ const mAsk = await evalJs(`(function(){ var m=document.getElementById('modal-mas
   return { vis: !!(m && !m.hidden), title: t?t.textContent:'', ok: okB?okB.textContent:'', staticText: (st&&!st.hidden)?st.textContent:'' }; })()`);
 ok('B2 点入口行＝弹用法说明（讲清点哪四下、只读不改设置），按钮文案「开始」',
   !!mAsk && mAsk.vis && mAsk.title.indexOf('闪屏自测') === 0 && mAsk.ok === '开始' && mAsk.staticText.indexOf('只读采样') >= 0 && mAsk.staticText.indexOf('不改你的任何设置') >= 0, mAsk);
+// #1015：入口多了时长档，默认档是「1 分钟 边用边测」。本节要测的是「点 4 下」那条路，先把胶囊切回去。
+const PICK_PILL = (kw) => `(function(){ var pl=document.getElementById('modal-pills'); if(!pl) return false;
+  var bs=[].slice.call(pl.children); for (var i=0;i<bs.length;i++){ if (String(bs[i].textContent).indexOf(${JSON.stringify(kw)}) === 0) { bs[i].click(); return true; } } return false; })()`;
+const mPillTxt = await evalJs(`(function(){ var pl=document.getElementById('modal-pills'); if(!pl) return '';
+  var on=pl.querySelector('.pill.on');
+  return [].slice.call(pl.children).length + '/' + (on ? on.textContent : '') + '/' + [].slice.call(pl.children).map(function(c){return c.textContent;}).join('|'); })()`);
+ok('B2b 入口胶囊＝两档（点 4 下精确对照 / 1~5 分钟长窗口），默认选中 1 分钟长窗口',
+  mPillTxt === '4/1 分钟/点 4 下（精确对照）|1 分钟|3 分钟|5 分钟', mPillTxt);
+await evalJs(PICK_PILL('点 4 下'));
+await sleep(150);
 await evalJs(`(function(){ var b=document.getElementById('modal-ok'); if(b) b.click(); return 1; })()`);
 await sleep(400);
 const mStart = await evalJs(`(function(){ var c=document.getElementById('fc-chip');
@@ -359,6 +372,8 @@ const gOpen = await evalJs(`(function(){ var d=document.getElementById('gc-beaut
 ok('G0 前置：群聊美化抽屉真的打开（群聊设置 → 美化 → 边看边调）', !!(gOpen && gOpen.drawer && gOpen.pills > 5), gOpen);
 await evalJs(`(function(){ var r=document.getElementById('row-flash-check'); if(r) r.click(); return 1; })()`);
 await sleep(300);
+await evalJs(PICK_PILL('点 4 下'));
+await sleep(150);
 await evalJs(`(function(){ var b=document.getElementById('modal-ok'); if(b) b.click(); return 1; })()`);
 await sleep(400);
 // 固定到「气泡」分区（切分区那一下也算抽屉点击），再重开一轮＝窗口里只有那四下档位点击
@@ -391,6 +406,45 @@ const gDiag = await evalJs(`(function(){ return window.mochiFlashCheck.report().
 ok('G5 点错地方时如实说是「点了但不在抽屉里」（删＝两种情形同一句话，用户与开发者都无从下手）',
   /没有采到「抽屉里」的点击：这段时间共采到 \d+ 次屏幕点击/.test(gDiag || ''), { head: (gDiag || '').slice(0, 200) });
 await evalJs(`(function(){ window.mochiFlashCheck.stop(); return 1; })()`);
+
+console.log('== W 长窗口「边用边测」（#1015）==');
+// 4 秒窗口（产品档位是 1/3/5 分钟，这里按 ms 直调同一函数，窗口机制与档位无关）
+const wStart = await evalJs(`(function(){ window.mochiFlashCheck.start(4000);
+  var s = window.mochiFlashCheck.winStats();
+  return { on: window.mochiFlashCheck.running(), win: !!s, ms: s ? s.ms : 0,
+    chip: (document.getElementById('fc-chip-txt')||{}).textContent || '' }; })()`);
+ok('W1 长窗口起测＝探针在位、窗口态成立（ms=4000），逐秒浮条已切到「边用边测」口径',
+  !!wStart && wStart.on === true && wStart.win === true && wStart.ms === 4000 && /边用边测中/.test(wStart.chip || ''), wStart);
+// 判据自证：①静置 >400ms 之后自己动手改 :root ＝「无操作翻动」；②紧接着用户操作的翻动不算
+const wInject = await evalJs(`(async function(){
+  await new Promise(function(r){ setTimeout(r, 900); });
+  var root = document.documentElement;
+  root.style.setProperty('--msg-fc-idle', '1px');                   // 无操作翻动（前面 900ms 里没人动手）
+  await new Promise(function(r){ setTimeout(r, 150); });
+  document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));  // 用户动手
+  root.style.setProperty('--msg-fc-act', '1px');                    // 紧接着的翻动＝有操作凭据，不算
+  return true; })()`);
+const wMid = await evalJs(`(function(){ var s = window.mochiFlashCheck.winStats();
+  return s ? { flips: s.flips, idle: s.idle, waste: s.waste } : null; })()`);
+ok('W2 无操作翻动判得出：静置期自己动手那一下计 1 次，紧接着操作的翻动不计（删判据＝最可疑的闪源失去口径）',
+  !!wInject && !!wMid && wMid.idle === 1 && wMid.flips >= 2, wMid);
+await sleep(3600);   // 等窗口自然到点（到点应自动出报告并摘净探针）
+const wEnd = await evalJs(`(function(){ var m=document.getElementById('modal-mask'), t=document.getElementById('modal-title'),
+  tx=document.getElementById('modal-textarea');
+  return { vis: !!(m && !m.hidden), title: t?t.textContent:'', text: tx?tx.value:'',
+    running: window.mochiFlashCheck.running(), chip: !!document.getElementById('fc-chip') }; })()`);
+ok('W3 到点自动出报告并摘净探针（删＝时间到了不出报告，用户不知道还得去点浮条）',
+  !!wEnd && wEnd.vis === true && wEnd.title === '闪屏自测结果' && wEnd.running === false && wEnd.chip === false, { t: wEnd && wEnd.title, run: wEnd && wEnd.running });
+const wTxt = (wEnd && wEnd.text) || '';
+ok('W4 报告含长窗口段（翻动/白写/掉帧 + 无操作翻动时刻 + 长窗口结论）',
+  /—— 长窗口观测（4 秒）——/.test(wTxt) && /无操作翻动 1 次/.test(wTxt) && /第 \d+ 秒 · /.test(wTxt) && /结论（长窗口）：抓到 1 次/.test(wTxt), { text: wTxt });
+ok('W5 长窗口轮不再训「你没点档位」（删＝用户在长窗口轮被报「没有采到任何屏幕点击」，等于白测）',
+  wTxt.indexOf('没有采到任何屏幕点击') < 0 && wTxt.indexOf('没有采到「抽屉里」的点击') < 0);
+const wKv = await evalJs(`(function(){ var a=[]; for (var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if (k.indexOf('flash-check') >= 0) a.push(k); } return a; })()`);
+ok('W6 长窗口报告照旧只落 flash-check-last 一个键（只读边界不变）',
+  Array.isArray(wKv) && wKv.length === 1 && wKv[0] === 'xy-home-v2:flash-check-last', wKv);
+await evalJs(`(function(){ var b=document.getElementById('modal-ok'); if(b) b.click(); return 1; })()`);
+await sleep(200);
 const zAll = await evalJs(`(function(){ return (window.__jsErrors||[]).slice(); })()`) || [];
 const z1 = zAll.slice(jsBase.length);
 ok('Z 自测全程零 JS 异常', Array.isArray(z1) && z1.length === 0, z1);

@@ -14,9 +14,22 @@ var SEG_SHOW_MS = 10000;          // 单段 <10 秒不给数字（样本太少�
 var FG_WARN = 18, FG_BAD = 35;    // 前台使用 %/小时 参考带
 var BG_WARN = 3, BG_BAD = 8;      // 后台段（页面仍在跑）%/小时 参考带
 var GAP_WARN = 2, GAP_BAD = 6;    // 未运行段（页面没在跑）参考带——只作对照，不进结论
-var HEAT_IDLE_MS = 3000, HEAT_ROUNDS = 10, HEAT_ROUND_MS = 700, HEAT_GAP_MS = 20;
+var HEAT_DURS = { '10': 10000, '60': 60000, '180': 180000, '300': 300000 };
+var HEAT_API_MS = 10000;          // 模块 API 不传时长时按 10 秒跑（无头验证/快速复核；UI 永远显式传档位）
+var HEAT_IDLE_MS = 3000;          // 负载前静置：量基准帧率
+var HEAT_TAIL_MS = 3000;          // 负载后静置：量恢复帧率（同一台机器前后对照）
+var HEAT_SLICE_MS = 60;           // 每片固定工作量（首片现场校准到 ~60ms）
+var HEAT_WARMUP = 5;              // 前 5 片只作 JIT 预热，不进统计
+var HEAT_MIN_JUDGE_MS = 60000;    // 负载不足 60 秒只算快测（热不起来，判不了「越跑越慢」）
+var HEAT_BINS = 6;                // 趋势分箱数
+var HEAT_TICK_MS = 500;           // 进度浮条刷新间隔（3 分钟窗口下每 0.5 秒一次足够）
+var HEAT_PILLS = [{ label: '10 秒·快测', value: '10' }, { label: '1 分钟', value: '60' }, { label: '3 分钟', value: '180' }, { label: '5 分钟', value: '300' }];
 var SLOW_BAD = 0.25, SLOW_MILD = 0.10; // 末段比开头慢的判定阈值（发热降频的共用阈值）
 var BAT_DURS = { '15': 900000, '30': 1800000, '60': 3600000, '180': 10800000, '480': 28800000 };
+var BAT_PILLS = [{ label: '15 分钟·粗测', value: '15' }, { label: '30 分钟·粗测', value: '30' }, { label: '1 小时', value: '60' }, { label: '3 小时', value: '180' }, { label: '过夜 8 小时', value: '480' }];
+var BAT_REF_MS = 3600000;         // 不足 1 小时的窗口：结论里标明「属粗测」
+var SEG_COARSE_MS = 15 * 60 * 1000; // 单段 5~15 分钟也标粗测（旧版只把 <5 分钟标粗测，6 分钟的段看着和 1 小时的段一样正式）
+var _heatSink = 1;                // 见下方 ②（原先与 _heatRunning 同声明，本批拆开）
 function lsGet(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
 function lsSet(k, o) { try { localStorage.setItem(k, JSON.stringify(o)); return true; } catch (e) { return false; } }
 function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
@@ -244,9 +257,9 @@ updateBatSub();
 function segTxt(name, ms, drop, warn, bad) {
 if (ms < SEG_SHOW_MS) return null;
 var rt = rate(drop, ms);
-var coarse = ms < SEG_MIN_MS;
-return '· ' + name + '：约 ' + rt + '%/小时' + (coarse
-? '（不足 5 分钟，粗测、仅供参考）'
+var tier = ms < SEG_MIN_MS ? '不足 5 分钟' : (ms < SEG_COARSE_MS ? '不足 15 分钟' : '');
+return '· ' + name + '：约 ' + rt + '%/小时' + (tier
+? '（' + tier + '，粗测、仅供参考）'
 : '（参考：≤' + warn + ' 正常 / ' + warn + '~' + bad + ' 偏高 / >' + bad + ' 异常）');
 }
 function batUnsupported() {
@@ -289,7 +302,7 @@ var worst = null;
 cands.forEach(function (c) { if (!worst || order[c.b] > order[worst.b]) worst = c; });
 var verdict = worst ? worst.b : '数据不足';
 var rateTxt = worst ? (worst.n + ' ' + worst.r + '%/小时') : '';
-L.push('结论：' + verdict + (worst ? '（' + worst.n + '约 ' + worst.r + '%/小时）' : totalMs < SEG_MIN_MS ? '（窗口太短/掉电小于 1%，看下方粗测值）' : '（各段样本都不足 5 分钟，看下方粗测值）'));
+L.push('结论：' + verdict + (worst ? '（' + worst.n + '约 ' + worst.r + '%/小时）' : totalMs < SEG_MIN_MS ? '（窗口太短/掉电小于 1%，看下方粗测值）' : '（各段样本都不足 5 分钟，看下方粗测值）') + (totalMs < BAT_REF_MS ? '· 窗口不足 1 小时，属粗测' : ''));
 L.push('窗口 ' + mins(totalMs) + '：前台 ' + mins(run.fgMs) + ' / 后台（页面仍在跑）' + mins(run.bgMs) + ' / 页面未运行 ' + mins(run.gapMs) + (unkMs > 0 ? ' / 不确定 ' + mins(unkMs) : '') + (run.chgMs > 0 ? ' / 充电中 ' + mins(run.chgMs) : ''));
 L.push('电量 ' + Math.round(run.lv0 * 100) + '% → ' + Math.round(run.lvEnd * 100) + '%（采样 ' + run.n + ' 次，设计每 ' + Math.round(run.iv / 1000) + ' 秒、实测平均每 ' + Math.round(avgIv / 1000) + ' 秒）');
 if (jitter > 0) L.push('· 电量计抖动 ' + (Math.round(jitter * 10) / 10) + ' 个百分点（掉了又回升），下方各段速率已按实测净掉电 ' + (Math.round(Math.max(0, net) * 10) / 10) + '% 等比折算');
@@ -322,7 +335,7 @@ L.push('（电量数据由浏览器接口读取，只在本机统计、不上传
 var rep = { t: Date.now(), verdict: verdict, rateTxt: rateTxt, run: { fgMs: run.fgMs, bgMs: run.bgMs, gapMs: run.gapMs, unkMs: unkMs, chgMs: run.chgMs, n: run.n, net: net, jitter: jitter }, text: L.join('\n') };
 return rep;
 }
-var _heatRunning = false, _heatSink = 1;
+var _heatRunning = false, _heatStop = false, _heatProg = null;
 function heatWork(n) {
 var x = _heatSink | 1;
 for (var i = 0; i < n; i++) { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; x = (x + i) | 0; }
@@ -335,28 +348,58 @@ if (slow >= SLOW_BAD) return '明显降频';
 if (slow >= SLOW_MILD) return '轻度降频';
 return '未见降频';
 }
+function durTxt(ms) {
+var s = Math.round(Math.max(0, ms) / 1000);
+if (s < 60) return s + ' 秒';
+var m = Math.round(s / 60 * 10) / 10;
+return (m % 1 === 0 ? m : m.toFixed(1)) + ' 分钟';
+}
+function binMeds(arr, k) {
+var out = [], n = arr.length, i, a, b;
+if (!n) return out;
+for (i = 0; i < k; i++) {
+a = Math.floor(i * n / k); b = Math.floor((i + 1) * n / k);
+if (b <= a) b = a + 1;
+out.push(med(arr.slice(a, b)));
+}
+return out;
+}
 function heatText(rep) {
 var L = [];
-var r = rep.rounds || [];
-var early = med(r.slice(1, 4)), late = med(r.slice(-3));
+var r = rep.slices || [];
+var loadMs = rep.loadMs || 0;
+var warm = r.length > HEAT_WARMUP ? r.slice(HEAT_WARMUP) : r;
+var n10 = Math.max(3, Math.floor(warm.length / 10));
+var early = warm.length ? med(warm.slice(0, n10)) : 0;
+var late = warm.length ? med(warm.slice(warm.length - n10)) : 0;
 var slow = early > 0 ? (late - early) / early : 0;
-var verdict = r.length >= 6 ? heatVerdict(slow) : '数据不足';
-rep.verdict = verdict; rep.early = Math.round(early); rep.late = Math.round(late); rep.slow = slow;
-var dir = slow >= 0 ? '慢 ' : '快 ';
-L.push('结论：' + verdict + (r.length >= 6 ? '（末段比开头' + dir + Math.abs(Math.round(slow * 1000) / 10) + '%）' : '（轮次样本不足）'));
-L.push('采样 ' + Math.round((rep.totalMs || 0) / 1000) + ' 秒：静置 ' + Math.round(HEAT_IDLE_MS / 1000) + ' 秒量基准 + 固定负载 ' + r.length + ' 轮（每轮约 ' + Math.round(HEAT_ROUND_MS / 10) * 10 + 'ms，' + Math.round((rep.workN || 0) / 10000) + ' 万次运算/轮）');
-if (r.length >= 6) L.push('· 负载耗时：开头 3 轮中位 ' + Math.round(early) + 'ms → 最后 3 轮中位 ' + Math.round(late) + 'ms（' + (slow >= 0 ? '+' : '') + Math.round(slow * 1000) / 10 + '%；判级：<10% 未见降频 / 10~25% 轻度 / ≥25% 明显降频）');
+var bins = binMeds(r, HEAT_BINS);
+var enough = r.length >= (HEAT_WARMUP + 12);
+var verdict = enough ? heatVerdict(slow) : '数据不足';
+var short = loadMs < HEAT_MIN_JUDGE_MS;
+rep.verdict = verdict; rep.early = Math.round(early); rep.late = Math.round(late);
+rep.slow = slow; rep.bins = bins; rep.short = short;
+L.push('结论：' + verdict
++ (enough ? '（末段比开头' + (slow >= 0 ? '慢 ' : '快 ') + Math.abs(Math.round(slow * 1000) / 10) + '%）' : '（负载样本不足）')
++ (short ? '· 本次是 ' + durTxt(loadMs) + '快测：只说明「此刻有没有被限速」，测不出不代表不烫' : ''));
+L.push('采样 ' + Math.round((rep.totalMs || 0) / 1000) + ' 秒：静置 ' + durTxt(HEAT_IDLE_MS) + ' 量基准帧率 → 固定负载 ' + durTxt(loadMs)
++ '（' + r.length + ' 片 × 约 ' + Math.round(HEAT_SLICE_MS) + 'ms，每片 ' + Math.round((rep.workN || 0) / 10000) + ' 万次运算）→ 再静置 ' + durTxt(HEAT_TAIL_MS) + ' 看帧率恢复'
++ (rep.pauseMs >= 1000 ? '（中途页面不可见 ' + durTxt(rep.pauseMs) + ' 已暂停、不计入负载）' : ''));
+if (bins.length >= 2) L.push('· 负载耗时趋势（整窗按时间分成 ' + bins.length + ' 段的中位）：' + bins.map(function (b) { return Math.round(b * 10) / 10; }).join(' → ') + ' ms');
+if (enough) L.push('· 开头 10% 中位 ' + Math.round(early) + 'ms → 最后 10% 中位 ' + Math.round(late) + 'ms（' + (slow >= 0 ? '+' : '') + Math.round(slow * 1000) / 10 + '%；判级：<10% 未见降频 / 10~25% 轻度 / ≥25% 明显降频）');
 var idleFps = rep.idleMs > 0 ? Math.round(rep.idleFrames * 1000 / rep.idleMs) : 0;
-var wkFps = rep.workMs > 0 ? Math.round(rep.workFrames * 1000 / rep.workMs) : 0;
-L.push('· 帧率：静置期约 ' + idleFps + 'fps；负载期约 ' + wkFps + 'fps' + (rep.workJank > 0 ? '（掉帧 ' + rep.workJank + ' 帧、最长帧间隔 ' + rep.workWorst + 'ms）' : '') + (rep.idleWorst > 0 && rep.idleWorst > 50 ? '；静置期最长帧间隔 ' + rep.idleWorst + 'ms' : ''));
+var tailFps = rep.tailMs > 0 ? Math.round(rep.tailFrames * 1000 / rep.tailMs) : 0;
+L.push('· 帧率：负载前静置约 ' + idleFps + 'fps' + (rep.idleWorst > 50 ? '（最慢帧 ' + rep.idleWorst + 'ms）' : '') + ' → 负载后静置约 ' + tailFps + 'fps' + (rep.tailWorst > 50 ? '（最慢帧 ' + rep.tailWorst + 'ms）' : '') + '；负载期本测故意占满 CPU，掉帧 ' + rep.workJank + ' 帧属预期，只作对照');
 if (rep.batt) L.push('· 电池：' + rep.batt);
 L.push('· 发热相关因素：' + factorLines().join('；'));
-L.push('· 说明：浏览器读不到手机温度（系统不提供这个接口），本自测测的是「发烫的后果」——主频被系统压低后，同样的活越干越慢。测出「明显降频」＝手机很可能正在烫并限速（或开着省电/低电量模式，两者表现一样）；没测出也不代表不烫（可能还没到限频阈值）。');
+L.push('· 说明：浏览器读不到手机温度（系统不提供这个接口），本自测测的是「发烫的后果」——主频被系统压低后，同样的活越干越慢。手机从冷到热要 1 分钟以上，所以短档只答「此刻有没有被限速」，要看「越跑越慢」请用 3 分钟档；测出「明显降频」＝手机很可能正在烫并限速（或开着省电/低电量模式，两者表现一样）；没测出也不代表不烫（可能还没到限频阈值）。');
+if (rep.stopped) L.push('· 本次提前结束：负载只跑了 ' + durTxt(loadMs) + '，结论按已测到的部分给。');
 L.push('');
 L.push('建议：');
 var adv = [];
 if (verdict === '明显降频') adv.push('先把手机放凉几分钟再测一轮对照：凉机也「明显降频」＝多半是开了省电/低电量模式或系统长期限制性能，不是发烫；热机才降频＝就是发烫引起的');
 if (verdict === '轻度降频') adv.push('轻度降频：对照手摸温度，若确实烫＝按下方因素逐条排除；不烫则可能是系统温控偏保守，属正常波动');
+if (short) adv.push('这次只跑了 ' + durTxt(loadMs) + '（快测）：手机还没热起来就结束了，测不出「越跑越慢」是正常的——要判断发烫降频，请用 3 分钟档再跑一轮（跑完让手机凉一会儿）');
 var keepOn = false;
 try { var ka = (typeof window.__kaProbe === 'function') ? window.__kaProbe() : null; keepOn = !!(ka && ka.keep); } catch (e) {}
 if (keepOn) adv.push('「后台保活」开着：页面在后台持续运行＝最常见的发热源，不用后台通知时到 设置→系统 关掉，几分钟后再测一轮对照');
@@ -368,55 +411,36 @@ L.push('（测试负载固定、只在本机进行、不上传任何数据；「
 rep.text = L.join('\n');
 return rep;
 }
-function runHeat(onTick) {
+function runHeat(onTick, ms) {
 return new Promise(function (resolve) {
 if (_heatRunning) return resolve(null);
-_heatRunning = true;
+_heatRunning = true; _heatStop = false;
 onTick = typeof onTick === 'function' ? onTick : function () {};
-var rep = { t: Date.now(), rounds: [], idleFrames: 0, idleMs: 0, idleWorst: 0, workFrames: 0, workMs: 0, workWorst: 0, workJank: 0, workN: 0, batt: null, totalMs: 0 };
+ms = clamp(Number(ms) || HEAT_API_MS, HEAT_DURS['10'], HEAT_DURS['300']);
+var rep = { t: Date.now(), slices: [], idleFrames: 0, idleMs: 0, idleWorst: 0, tailFrames: 0, tailMs: 0, tailWorst: 0, workFrames: 0, workWorst: 0, workJank: 0, workN: 0, batt: null, totalMs: 0, loadMs: 0, pauseMs: 0, stopped: 0 };
 var t0 = performance.now(), last = t0, phase = 'idle', raf = 0, done = false;
+var actMs = 0, actAt = 0, hidAt = 0, lastTick = 0, tailAt = 0;
 function frame(now) {
 if (done) return;
 var d = now - last; last = now;
-if (phase === 'idle') {
-if (d < 250) { rep.idleFrames++; if (d > rep.idleWorst) rep.idleWorst = Math.round(d); }
-} else if (phase === 'work') {
-if (d < 250) { rep.workFrames++; if (d > rep.workWorst) rep.workWorst = Math.round(d); }
-if (d > 34) rep.workJank++;
-}
+if (phase === 'idle') { if (d < 250) { rep.idleFrames++; if (d > rep.idleWorst) rep.idleWorst = Math.round(d); } }
+else if (phase === 'load') { if (d < 250) rep.workFrames++; if (d > rep.workWorst) rep.workWorst = Math.round(d); if (d > 34) rep.workJank++; }
+else if (phase === 'tail') { if (d < 250) { rep.tailFrames++; if (d > rep.tailWorst) rep.tailWorst = Math.round(d); } }
 raf = requestAnimationFrame(frame);
 }
 raf = requestAnimationFrame(frame);
 getBm().then(function (bm) { rep.batt = battLine(bm); });
-function idleDone() {
-phase = 'work';
-rep.idleMs = performance.now() - t0;
-var calN = 200000; // 校准样本大些：performance.now 分辨率下量得准，且各机型同口径
-var unit = timeWork(calN);
-var n = clamp(Math.round(calN * HEAT_ROUND_MS / Math.max(unit, 0.1)), 2000, 400000000);
-rep.workN = n;
-rep._sk = performance.now();
-var rs = [];
-function round(i) {
-if (done) return;
-if (i >= HEAT_ROUNDS) return finish();
-var t = performance.now();
-heatWork(n);
-rs.push(performance.now() - t);
-rep.rounds = rs;
-onTick({ phase: 'work', i: i + 1, total: HEAT_ROUNDS, left: Math.max(0, Math.ceil((HEAT_IDLE_MS + (HEAT_ROUNDS - i - 1) * (HEAT_ROUND_MS + HEAT_GAP_MS) - (performance.now() - t0)) / 1000)) });
-setTimeout(function () { round(i + 1); }, HEAT_GAP_MS);
+function tick(name) {
+_heatProg = { phase: name, left: Math.max(0, Math.ceil((ms - actMs + HEAT_TAIL_MS) / 1000)) };
+onTick(_heatProg);
 }
-round(0);
-}
-setTimeout(idleDone, HEAT_IDLE_MS);
 function finish() {
 if (done) return;
 done = true;
 try { cancelAnimationFrame(raf); } catch (e) {}
-rep.workMs = performance.now() - (rep._sk || t0);
 rep.totalMs = performance.now() - t0;
-_heatRunning = false;
+rep.tailMs = tailAt > 0 ? Math.max(0, performance.now() - tailAt) : 0;
+_heatRunning = false; _heatProg = null;
 var out = heatText(rep);
 var lastRec = lsGet(HEAT_LAST_KEY, null) || {};
 lastRec.t = out.t; lastRec.verdict = out.verdict; lastRec.pending = 0; lastRec.text = out.text;
@@ -424,8 +448,40 @@ lsSet(HEAT_LAST_KEY, lastRec);
 updateHeatSub();
 resolve(out);
 }
+function slice() {
+if (done) return;
+if (document.hidden) {
+if (!hidAt) hidAt = performance.now();
+setTimeout(slice, 250);
+return;
+}
+if (hidAt) { rep.pauseMs += performance.now() - hidAt; hidAt = 0; actAt = performance.now(); }
+if (_heatStop) { rep.stopped = 1; return finish(); }
+var t = performance.now();
+heatWork(rep.workN);
+rep.slices.push(performance.now() - t);
+actMs += performance.now() - actAt; actAt = performance.now();
+rep.loadMs = actMs;
+if (actMs >= ms) { phase = 'tail'; tailAt = performance.now(); tick('tail'); setTimeout(finish, HEAT_TAIL_MS); return; }
+if (actMs - lastTick >= HEAT_TICK_MS) { lastTick = actMs; tick('load'); }
+setTimeout(slice, 0);
+}
+function loadPhase() {
+phase = 'load'; actAt = performance.now();
+var calN = 200000; // 校准样本大些：performance.now 分辨率下量得准，且各机型同口径
+var unit = timeWork(calN);
+rep.workN = clamp(Math.round(calN * HEAT_SLICE_MS / Math.max(unit, 0.1)), 500, 400000000);
+tick('load');
+slice();
+}
+function idleDone() {
+rep.idleMs = performance.now() - t0;
+loadPhase();
+}
+setTimeout(idleDone, HEAT_IDLE_MS);
 });
 }
+function stopHeat() { if (_heatRunning) { _heatStop = true; return true; } return false; }
 var batSubEl = null, batSubDefault = '', heatSubEl = null, heatSubDefault = '';
 function updateBatSub() {
 if (!batSubEl) return;
@@ -453,27 +509,40 @@ try { if (ctlR && ctlR.okText) ctlR.okText('结束并出报告'); } catch (e) {}
 return;
 }
 var ctl = window.openModal('电量消耗自测', '', function (v) {
-var ms = BAT_DURS[String(v)] || BAT_DURS['30'];
+var ms = BAT_DURS[String(v)] || BAT_DURS['60'];
 startBattery(ms, function (p) { bar('电量自测中…剩 ' + mins(p.left * 1000) + '（前台 ' + p.fgMin + ' 分 / 后台 ' + p.bgMin + ' 分）', 0); updateBatSub(); })
 .then(function (rep) { hideBar(); if (rep) deliver('battery', rep); });
 }, {
 noInput: true,
-pills: [{ label: '15 分钟', value: '15' }, { label: '30 分钟', value: '30' }, { label: '1 小时', value: '60' }, { label: '3 小时', value: '180' }, { label: '过夜 8 小时', value: '480' }],
-pill: '30',
-staticText: '测耗电快不快：确认后开始分段计时——前台用 / 切出去放着 / 页面被系统关掉，分开算 %/小时，充电段自动剔除；期间可以正常用手机，也可以去忙别的，时间到自动出报告（中途刷新、被系统杀进程重开都会续测）。\n建议拔掉充电器：充电中电量不降反升，测不出耗电。\n电量接口只有部分浏览器提供（安卓 Chrome/Edge 系有；iPhone 上任何浏览器都没有，属系统限制——那时本行会如实告知并给替代路径）。'
+warn: true, staticEmph: true,
+pills: BAT_PILLS,
+pill: '60',
+staticText: '**⚠ 15 / 30 分钟只能看趋势**——电量计只有 1% 一格，窗口太短数字粗得没意义；抓耗电异常请用 **1 小时档（已设为默认）**，最准是夜里放着跑**过夜档**。\n\n测法：确认后开始分段计时——前台用 / 切出去放着 / 页面被系统关掉，分开算 %/小时，充电段自动剔除；期间可以正常用手机、也可以去忙别的，时间到自动出报告（中途刷新、被系统杀进程重开都会续测）。想提前收工就再点一次本行 →「结束并出报告」，已测到的部分当场结算。\n建议拔掉充电器：充电中电量不降反升，测不出耗电。\n电量接口只有部分浏览器提供（安卓 Chrome/Edge 系有；iPhone 上任何浏览器都没有，属系统限制——那时本行会如实告知并给替代路径）。'
 });
 try { if (ctl && ctl.okText) ctl.okText('开始测'); } catch (e) {}
 }
 function runHeatUI() {
-if (!window.openModal || _heatRunning) return;
-var ctl = window.openModal('发烫自测', '', function () {
-runHeat(function (p) { bar('发烫自测中…剩 ' + p.left + ' 秒（请别操作屏幕）', 0); })
+if (!window.openModal) return;
+if (_heatRunning) {
+var ctlR = window.openModal('发烫自测进行中', '', function () { stopHeat(); }, {
+noInput: true,
+staticText: '正在跑固定负载' + (_heatProg ? '（剩约 ' + durTxt(_heatProg.left * 1000) + '）' : '') + '：负载切成 60ms 一小片，界面全程可用。\n点「提前结束并出报告」＝立刻结算已测到的部分；点「取消」＝继续跑（手机请放在一边、别操作屏幕）。\n（负载跑满整档才看得出「越跑越慢」；提前结束只能看已测那段，报告里会标明。）'
+});
+try { if (ctlR && ctlR.okText) ctlR.okText('提前结束并出报告'); } catch (e) {}
+return;
+}
+var ctl = window.openModal('发烫自测', '', function (v) {
+var ms = HEAT_DURS[String(v)] || HEAT_DURS['180'];
+runHeat(function (p) { bar('发烫自测中…剩 ' + p.left + ' 秒（' + (p.phase === 'load' ? '固定负载' : '静置对照') + '，请别操作屏幕）', 0); }, ms)
 .then(function (rep) { hideBar(); if (rep) deliver('heat', rep); });
 }, {
 noInput: true,
-staticText: '约 ' + Math.round((HEAT_IDLE_MS + HEAT_ROUNDS * (HEAT_ROUND_MS + HEAT_GAP_MS)) / 1000) + ' 秒：先静置 3 秒量基准帧率，再跑 10 轮固定工作量，比对开头与末尾的耗时——手机因发热被系统压慢时，同样的活会越干越慢（这就是「降频」）。\n说明：浏览器读不到手机温度（系统没有这个接口），所以本测的是「发烫的后果」而不是温度本身；测出「明显降频」＝手机很可能已经在烫，没测出也不代表不烫。\n开始后把手机放手边、不要操作屏幕（点按与切页会干扰测量），顶部浮条倒数，结束自动出报告。'
+warn: true, staticEmph: true,
+pills: HEAT_PILLS,
+pill: '180',
+staticText: '**⚠ 10 秒档只能答「此刻有没有被限速」**——手机从冷到热要 1 分钟以上，要看「越跑越慢」请用 **3 分钟档（已设为默认）**。\n\n做法：先静置 3 秒量基准帧率，再持续跑固定工作量 N 分钟（切成 60ms 一小片，界面全程可用、可中途【提前结束】出报告），最后再静置 3 秒看帧率是否恢复；比对整窗趋势＝手机被系统压慢了多少（这就是「降频」）。\n说明：浏览器读不到手机温度（系统没有这个接口），所以本测的是「发烫的后果」而不是温度本身；测出「明显降频」＝手机很可能已经在烫（或开着省电/低电量模式，两者表现一样），没测出也不代表不烫。\n开始后把手机放手边、不要操作屏幕（点按与切页会干扰测量），顶部浮条倒数，结束自动出报告。'
 });
-try { if (ctl && ctl.okText) ctl.okText('开始（约 ' + Math.round((HEAT_IDLE_MS + HEAT_ROUNDS * (HEAT_ROUND_MS + HEAT_GAP_MS)) / 1000) + ' 秒）'); } catch (e) {}
+try { if (ctl && ctl.okText) ctl.okText('开始（可中途结束）'); } catch (e) {}
 }
 function restoreRun() {
 var run = lsGet(BAT_RUN_KEY, null);
@@ -530,6 +599,9 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 window.mochiEnergyCheck = {
 startBattery: startBattery,
 startHeat: runHeat,
+stopHeat: stopHeat,
+heatProg: function () { return _heatProg; },
+HEAT_DURS: HEAT_DURS,
 batteryRunning: function () { return !!_batRun; },
 heatRunning: function () { return _heatRunning; },
 restoreRun: restoreRun,

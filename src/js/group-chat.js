@@ -2813,7 +2813,7 @@ if (defs && defs.type === 'text' && defs.text) t = defs.text;
     liveBtn.style.cssText = 'display:flex;align-items:center;gap:10px;width:calc(100% - 24px);margin:10px 12px 0;padding:11px 14px;border:1px solid var(--btn-bg,#111);border-radius:12px;background:color-mix(in srgb, var(--btn-bg,#111) 10%, transparent);color:var(--ink,#111);text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;flex-shrink:0';
     liveBtn.innerHTML = '<span style="flex:1;min-width:0">' +
       '<span style="display:block;font-size:15px;font-weight:700;line-height:1.25">边看边调</span>' +
-      '<span style="display:block;font-size:11.5px;font-weight:400;opacity:.85;margin-top:2px">打开调色条：群聊在上、控件在下，改哪看哪、即时生效</span>' +
+      '<span style="display:block;font-size:11.5px;font-weight:400;opacity:.85;margin-top:2px">打开调色条：群聊在上、控件在下，改哪看哪、即时生效；标题行可按住往上拖让位</span>' +
       '</span><span style="flex:none;font-size:12px;font-weight:700;padding:7px 10px;border:1px solid var(--btn-bg,#111);border-radius:999px;background:var(--btn-bg,#111);color:var(--btn-ink,#fff);white-space:nowrap">点击开启 ›</span>';
     liveBtn.addEventListener('click', openGcBeautyDrawer);
     rootEl.insertBefore(liveBtn, rootEl.firstChild);
@@ -3092,10 +3092,18 @@ if (defs && defs.type === 'text' && defs.text) t = defs.text;
     if (t.closest('.tab') || t.closest('#gc-back') || t.closest('.app[data-app]')) hideGcBeautyDrawer();
   }, true);
   let gcDrawerSec = 'bubble';
+  // v8.29 #1008：群聊抽屉此前完全没有拖动（单聊 #760 实现时没有同步过来——同族只改一半，
+  // 用户「托标题行可上移」在群聊里点不着），这里补齐：会话内记忆、不落盘（纯 UI 位置）。
+  let gcDockBot = null;
+  function gcDrawerApplyBottom() {
+    const d = document.getElementById('gc-beauty-drawer');
+    if (!d) return;
+    d.style.bottom = (gcDockBot || 0) + 'px';
+  }
   function openGcBeautyDrawer() {
     try { if (settingsPanel) settingsPanel.hidden = true; } catch (e) {}
     const d = gcDrawerEl();
-    d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:95;max-height:40vh;background:var(--card-bg,#fff);background:color-mix(in srgb, var(--card-bg,#fff) 72%, transparent);color:var(--ink,#111);box-shadow:0 -6px 24px rgba(0,0,0,.18);border-radius:16px 16px 0 0;overflow-y:auto;overflow-x:hidden;padding:0 12px calc(10px + var(--mochi-safe-bottom,env(safe-area-inset-bottom,0px)));box-sizing:border-box;display:flex;flex-direction:column;gap:8px';
+    d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:95;max-height:40vh;transition:bottom .16s ease;background:var(--card-bg,#fff);background:color-mix(in srgb, var(--card-bg,#fff) 72%, transparent);color:var(--ink,#111);box-shadow:0 -6px 24px rgba(0,0,0,.18);border-radius:16px 16px 0 0;overflow-y:auto;overflow-x:hidden;padding:0 12px calc(10px + var(--mochi-safe-bottom,env(safe-area-inset-bottom,0px)));box-sizing:border-box;display:flex;flex-direction:column;gap:8px';
     d.innerHTML = '';
     const grip = document.createElement('div');
     grip.style.cssText = 'width:36px;height:4px;border-radius:2px;background:var(--card-border,#ddd);margin:7px auto 0;flex:none';
@@ -3108,11 +3116,47 @@ if (defs && defs.type === 'text' && defs.text) t = defs.text;
       b.addEventListener('click', fn);
       return b;
     };
+    // v8.29 #1008：grip 与标题行可竖向拖动（口径与单聊 #760 / 桌面 #1008 逐字一致：pointer 事件
+    // + setPointerCapture，否则触摸序列会被内核抢成滚动＝「抖一下拖不动」；标题行里的按钮让行）。
+    const bindGcDockDrag = (el) => {
+      el.style.touchAction = 'none';
+      el.style.cursor = 'grab';
+      let sy = 0, sb = 0, drag = false;
+      el.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('button')) return;
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        drag = true; sy = e.clientY; sb = gcDockBot || 0;
+        d.style.transition = 'none'; // 拖动期间关掉 bottom 过渡，保证跟手
+        try { el.setPointerCapture(e.pointerId); } catch (er) {}
+        e.preventDefault();
+      });
+      el.addEventListener('pointermove', (e) => {
+        if (!drag) return;
+        gcDockBot = Math.max(0, Math.min(Math.round(window.innerHeight * 0.6), Math.round(sb + sy - e.clientY)));
+        gcDrawerApplyBottom();
+        e.preventDefault();
+      });
+      const up = () => {
+        if (!drag) return;
+        drag = false;
+        d.style.transition = 'bottom .16s ease';
+        if ((gcDockBot || 0) < 24) gcDockBot = null; // 接近底部＝吸附回贴底
+        gcDrawerApplyBottom();
+      };
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+    };
+    bindGcDockDrag(grip);
     const hd = document.createElement('div');
     hd.style.cssText = 'display:flex;align-items:center;gap:8px;flex:none';
     const hdTxt = document.createElement('span');
     hdTxt.textContent = '边看边调（即时生效）';
-    hdTxt.style.cssText = 'font-size:13px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    hdTxt.style.cssText = 'font-size:13px;font-weight:700;flex:none';
+    // v8.29 #1008：把「标题行可拖动」写出来（用户直派「用户并不知道有这个功能」）——提示挂在
+    // 标题行里，收起正文区后仍看得见。
+    const hdHint = document.createElement('span');
+    hdHint.textContent = '按住标题行上下拖 · 让开看群聊';
+    hdHint.style.cssText = 'font-size:11px;color:var(--muted,#888);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
     const panelBody = document.createElement('div');
     panelBody.style.cssText = 'display:flex;flex-direction:column;gap:8px;flex:none';
     const body = document.createElement('div');
@@ -3128,8 +3172,9 @@ if (defs && defs.type === 'text' && defs.text) t = defs.text;
       // 不回就成了「浮层一关只能在群聊页干瞪眼」
       try { gcSetTab = 'beauty'; renderSettingsPanel(); if (settingsPanel) settingsPanel.hidden = false; } catch (e) {}
     }, ';padding:4px 8px');
-    hd.appendChild(hdTxt); hd.appendChild(foldBtn); hd.appendChild(closeBtn);
+    hd.appendChild(hdTxt); hd.appendChild(hdHint); hd.appendChild(foldBtn); hd.appendChild(closeBtn);
     d.appendChild(hd);
+    bindGcDockDrag(hd); // grip 只有 4px 高，标题行才是主拖拽把手
     const chipsRow = document.createElement('div');
     chipsRow.style.cssText = 'display:flex;gap:6px;flex:none';
     panelBody.appendChild(chipsRow);
@@ -3365,14 +3410,21 @@ if (defs && defs.type === 'text' && defs.text) t = defs.text;
         return wrap;
       } }
     ];
-    const renderSec = (key) => {
-      gcDrawerSec = key;
+    const paintGcChips = (key) => {
       Array.prototype.forEach.call(chipsRow.children, c => {
         const on = c.dataset.sec === key;
-        c.style.background = on ? 'var(--ink,#111)' : 'var(--btn-cancel-bg,#fafafa)';
-        c.style.color = on ? 'var(--bg-b,#fff)' : 'var(--ink,#111)';
-        c.style.borderColor = on ? 'var(--ink,#111)' : 'var(--card-border,#ddd)';
+        const bg = on ? 'var(--ink,#111)' : 'var(--btn-cancel-bg,#fafafa)';
+        if (c.style.background !== bg) c.style.background = bg;
+        const fg = on ? 'var(--bg-b,#fff)' : 'var(--ink,#111)';
+        if (c.style.color !== fg) c.style.color = fg;
+        const bd = on ? 'var(--ink,#111)' : 'var(--card-border,#ddd)';
+        if (c.style.borderColor !== bd) c.style.borderColor = bd;
       });
+    };
+    const renderSec = (key) => {
+      // v8.29 #1008：点亮态只在真变化时写（同单聊口径；重建控件区的行为保留，见单聊注释）。
+      gcDrawerSec = key;
+      paintGcChips(key);
       body.innerHTML = '';
       paletteHost = null;
       colorItems = [];
@@ -3387,6 +3439,7 @@ if (defs && defs.type === 'text' && defs.text) t = defs.text;
       chipsRow.appendChild(c);
     });
     renderSec(gcDrawerSec);
+    gcDrawerApplyBottom();
     d.style.display = 'flex';
   }
 
@@ -4053,13 +4106,20 @@ if (defs && defs.type === 'text' && defs.text) t = defs.text;
     gcImgInput = fi;
     // 原生 label 激活层（等 input 挂进文档、id/accept 就位后才接）
     if (window.mochiFilePickLabel && gcImgBtn) window.mochiFilePickLabel(gcImgBtn, fi);
+    // FIX 2026-09-21 #1002（第九波续）：群聊输入栏「插入图片」同样铺「真·可点 input」层——手指物理落在
+    // 真 input 上，选择器由浏览器原生默认动作弹出，不再依赖 label 转发 / JS 合成 click / showPicker。
+    if (window.mochiFilePickSurface && gcImgBtn) window.mochiFilePickSurface(gcImgBtn, { id: 'gc-img-tap', accept: 'image/*', multiple: true, owner: fi });
     return fi;
   }
+  // FIX 2026-09-21 #1002：**绑定时**就铺一次真·可点 input 层（放在点按处理器里＝第一次点按赶不上）
+  try { if (window.mochiFilePickSurface && gcImgBtn) window.mochiFilePickSurface(gcImgBtn, { id: 'gc-img-tap', accept: 'image/*', multiple: true, owner: gcImgPicker() }); } catch (err) {}
   if (gcImgBtn) gcImgBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const fi = gcImgPicker();
     // 输入栏整段重建后按钮是新节点、label 层会丢 ⇒ 每次点按幂等补挂（只在缺失时补）
     try { if (window.mochiFilePickLabel) window.mochiFilePickLabel(gcImgBtn, fi); } catch (err) {}
+    // #1002：按钮被整段重建过也把 surface 层幂等补回来
+    try { if (window.mochiFilePickSurface) window.mochiFilePickSurface(gcImgBtn, { id: 'gc-img-tap', accept: 'image/*', multiple: true, owner: fi }); } catch (err) {}
     // FIX 2026-09-18 #756：原 fromLabel 早退在国产内核（label 存在但不转发）时连 JS 兜底
     // 一起跳过＝「插图片点了完全没反应」；改由 guard 事后确认真未弹出再补 click
     // FIX 2026-09-20 #920：兜底腿改走全站统一三腿（showPicker→click；小米系对合成 click 静默不弹）

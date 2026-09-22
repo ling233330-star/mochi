@@ -115,7 +115,7 @@ ico: '<svg viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="1.8" s
 title: '联系人跨桌面查岗',
 subTag: '功能说明',
 tagTitle: '联系人跨桌面查岗',
-detail: '其他桌面的联系人是各自独立触发、互不影响：TA 每 60 秒「探测」一次你是否还醒着，触发频率按「跨桌面查岗频率」三档模式全局统一控制（频繁/标准/安静，下方可选，含来电）；同一联系人触发后有冷却、不重复打扰。你回复后 TA 会现场回应。关闭后其他桌面的 TA 不再来查岗、也不再找你聊天。',
+detail: '其他桌面的联系人是各自独立触发、互不影响：TA 每 60 秒「探测」一次你是否还醒着，触发频率按「跨桌面查岗频率」三档模式全局统一控制（频繁/标准/安静，下方可选，含来电）；同一联系人触发后有冷却、不重复打扰。你回复后 TA 会现场回应。关闭后其他桌面的 TA 不再来查岗、也不再找你聊天。想立刻来一次：聊天 →「更多功能 → TA的提问 → 跨桌面查岗」（不看概率与冷却；本开关关着时只提示、不触发）。',
 get: deskCheckinEn,
 set: window.setDeskCheckinEn,
 toast: function (en) { return en ? '已开启：其他桌面的TA会来查岗、找你聊天' : '已关闭：其他桌面的TA不再来查岗打扰'; }
@@ -558,6 +558,21 @@ if (!deskCheckinEn()) { try { if (window.toast) window.toast('联系人跨桌面
 const q = window.ckQuestionPickFor ? window.ckQuestionPickFor(cid || 'default') : null;
 if (!q || !q.text) return false;
 return deliver({ cid: cid || 'default', kind: 'checkin', text: q.text, q: q, ts: Date.now(), status: 'pending' }, true);
+};
+window.triggerIncomingCheckinNow = function () {
+try {
+const _toast = function (t) { try { if (typeof window.toast === 'function') window.toast(t); } catch (e) {} };
+if (!deskCheckinEn()) { _toast('联系人跨桌面查岗已关闭，可在 设置 里开启'); return false; }
+const cur = window.__activeCid || 'default';
+const others = (window.getContacts() || []).filter(function (c) { return c && c.id !== cur; });
+if (!others.length) { _toast('只有当前桌面，没有其他桌面的联系人'); return false; }
+const pool = others.filter(function (c) { return num(cfgFor(c.id), 'ckq-en', 1) === 1 && !hasPending(c.id); });
+if (!pool.length) { _toast('其他桌面的联系人都关了「TA 主动查岗」，可在 回复设置 → 查岗 里开启'); return false; }
+const who = pool[Math.floor(Math.random() * pool.length)];
+const fired = window.triggerIncomingCheckin(who.id);
+if (!fired) _toast('这个桌面的查岗题库是空的，可在 字卡库 →「TA的查岗」里添加或开启');
+return fired;
+} catch (e) { return false; }
 };
 window.triggerIncomingCallReq = function (cid) {
 if (!deskCallEn()) { try { if (window.toast) window.toast('联系人跨桌面打电话已关闭（可在设置里开启）'); } catch (e) {} return false; }

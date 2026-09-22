@@ -605,12 +605,7 @@ hold = !!(md && String(md.title) === 'Mochi 后台保活');
 }
 } catch (e) { hold = true; }
 if (hold) {
-try {
-if (navigator.mediaSession && navigator.mediaSession.playbackState !== 'playing') {
-try { if (window.__mochiPhase) window.__mochiPhase('ka-ms'); } catch (e0) {}
-navigator.mediaSession.playbackState = 'playing';
-}
-} catch (e) {}
+try { if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing'; } catch (e) {}
 }
 if (kaPauseStreak && Date.now() - kaLastPlayAt > kaStableMs()) kaPauseStreak = 0;
 return;

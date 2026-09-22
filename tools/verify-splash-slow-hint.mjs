@@ -1,12 +1,12 @@
-// ===== 专项验证：#658 开屏「为什么慢」说明（用户直派：用户只想知道开屏为什么卡顿，总以为卡顿是 bug） =====
-// 需求：① 公告（在线 notice.json / 离线 template.html 双份）写明「打开 / 开屏时偶尔慢一下，多半不是 bug」
-//       及原因（整站代码要读完 + 本机数据要读回；只有公告文案与版本检测需要联网）；
-//       ② 等得较久时在加载提示下就地补一行原因，用户不必去翻公告章节。
+// ===== 专项验证：#658/#661c 开屏「为什么慢」就地解释 + #974 那章公告已删（不得回流） =====
+// 沿革：#658 做「等得久就地解释」；#661 追加一条**独立公告章**（在线 notice.json / 离线 template.html
+//       双份）＋必读摘要高亮；**#974（2026-09-21 用户直派「开屏的…删掉」）把那条公告章整章撤除**，
+//       只保留就地解释这一半。故本脚本一脚本两用：C/E 守就地解释仍在，D 守被删那章不得回流。
 // 用例组：
 //   A 默认（快）：加载提示在位，解释行默认隐藏——不能一上来就多一行文字
 //   B 数据慢（slow）：派发 mochi-restore-slow → 加载文案转「数据较多，仍在加载…」且解释行出现
 //   C 数据就绪且页面加载完：解释行收回（没在等就不解释）
-//   D 文案：解释行含「不是坏了」；公告章节含该块（离线兜底 DOM + 在线 notice.json 源）
+//   D #974：该章在屏上（目录 / 摘要 / 正文）与两份源文件里都查不到，且没被挪去 Bug 章
 //   E 样式：.splash-loading-sub 规则已进样式表
 //   F 无 JS 异常
 // 说明：本脚本直接从 src/ 拼测试页（同 verify-entry-flow.mjs），不依赖已构建产物，改完 src 即可跑。
@@ -162,7 +162,7 @@ try {
   ok('数据就绪后加载提示隐藏', s && s.loadVisible === false, s);
   ok('解释行随之收回（不残留）', s && s.subVisible === false, s);
 
-  console.log('\n== D 位置与文案：独立成章 + 放显眼处（目录第一位 + 必读摘要高亮），且不在 Bug 章 ==');
+  console.log('\n== D #974：该章已整章撤除，屏上与两份源文件里都不得回流 ==');
   const domText = await evalJs("(function(){ const n=document.getElementById('splash-notice'); return n ? n.textContent : ''; })()");
   const onlineSub = await evalJs("(function(){ const e=document.querySelector('#splash-notice .splash-notice-sub'); return e ? e.textContent : ''; })()");
   ok('在线 notice.json 真渲染了（副标题取在线文案，非 template 兜底）', !!(onlineSub && onlineSub.indexOf('详细说明见目录各章节') >= 0), onlineSub);
@@ -179,24 +179,27 @@ try {
       bugHasIt: !!(bugWrap && bugWrap.textContent.indexOf('开屏偶尔慢') >= 0)
     };
   })()`);
-  ok('独立成章：章标题「开屏偶尔慢一下，是正常的（不是 bug）」在位', !!(place && place.heads.some((h) => h.indexOf('开屏偶尔慢一下，是正常的（不是 bug）') >= 0)), place && place.heads);
-  ok('摆在显眼处：是目录里的第一个章节（默认展开）', !!(place && place.first.indexOf('开屏偶尔慢一下，是正常的（不是 bug）') >= 0), place && place.first);
-  ok('必读摘要里有高亮一条（不进章节点也看得到）', !!(place && place.inSummary === true), place);
-  ok('Bug 章（二、关于 Bug、报修与适配）不再夹带该解释', !!(place && place.bugHasIt === false), place);
-  ok('公告含原因说明（读整站代码 + 读本机数据）', !!(domText && domText.indexOf('整站代码') >= 0 && domText.indexOf('本机的数据') >= 0));
-  ok('公告含「只有公告文案和版本检测需要联网」', !!(domText && domText.indexOf('版本检测') >= 0));
-  ok('公告含「还一直卡→数据体积→一键优化」去处', !!(domText && domText.indexOf('卡顿自检') >= 0));
+  const TITLE = '开屏偶尔慢一下，是正常的（不是 bug）';
+  const HLLINE = '开屏 / 打开时偶尔慢几秒是正常的，不是 bug';
+  ok('#974 屏上无该章：目录里查不到这枚章标题', !!(place && !place.heads.some((h) => h.indexOf('开屏偶尔慢一下') >= 0)), place && place.heads);
+  ok('#974 屏上必读摘要里也无该高亮条', !!(place && place.inSummary === false), place);
+  ok('该章也没被挪去 Bug 章（二、关于 Bug、报修与适配）', !!(place && place.bugHasIt === false), place);
+  ok('#974 公告正文无该章残留（该章独有的句子都不得再出现）', !!(domText && domText.indexOf('先把结论说在前面') < 0 && domText.indexOf('整站代码') < 0 && domText.indexOf('重开等于从头再读一遍') < 0));
+  ok('只删这一章：目录仍有其它章节（没把目录清空）', !!(place && place.heads.length >= 3), place && place.heads.length);
 
   let noticeSrc = null;
   try { noticeSrc = JSON.parse(readFileSync(join(root, 'src/pwa/notice.json'), 'utf8')); } catch (e) {}
-  ok('在线源 notice.json：新章就是 sections[0]', !!(noticeSrc && noticeSrc.sections && noticeSrc.sections[0] && noticeSrc.sections[0].h === '开屏偶尔慢一下，是正常的（不是 bug）'), noticeSrc && noticeSrc.sections && noticeSrc.sections[0] && noticeSrc.sections[0].h);
-  ok('在线源：摘要含该高亮条', !!(noticeSrc && noticeSrc.summary && JSON.stringify(noticeSrc.summary).indexOf('开屏 / 打开时偶尔慢几秒是正常的，不是 bug') >= 0));
+  const srcJson = noticeSrc ? JSON.stringify(noticeSrc) : '';
+  ok('#974 在线源 notice.json：sections 里无该章', !!(noticeSrc && noticeSrc.sections && !noticeSrc.sections.some((x) => x && x.h === TITLE)), noticeSrc && noticeSrc.sections && noticeSrc.sections.map((x) => x && x.h));
+  ok('#974 在线源：摘要里无该高亮条', !!(noticeSrc && srcJson.indexOf(HLLINE) < 0));
+  ok('#974 在线源：正文无该章独有的句子残留', !!(noticeSrc && srcJson.indexOf('先把结论说在前面') < 0 && srcJson.indexOf('重开等于从头再读一遍') < 0));
+  ok('在线源目录首位已顺延（默认展开不落在已删章的空位上）', !!(noticeSrc && noticeSrc.sections && noticeSrc.sections[0] && noticeSrc.sections[0].h !== TITLE), noticeSrc && noticeSrc.sections && noticeSrc.sections[0] && noticeSrc.sections[0].h);
   const bugSec = noticeSrc && noticeSrc.sections && noticeSrc.sections.find((x) => String(x.h).indexOf('二、') === 0);
-  ok('在线源：Bug 章已无该解释块（删干净）', !!bugSec && JSON.stringify(bugSec).indexOf('开屏偶尔慢') < 0);
-  ok('在线源：新章含原因与去处（口径与离线兜底一致）', !!(noticeSrc && noticeSrc.sections && JSON.stringify(noticeSrc.sections[0]).indexOf('整站代码') >= 0 && JSON.stringify(noticeSrc.sections[0]).indexOf('卡顿自检') >= 0));
+  ok('在线源：Bug 章本来就没有该解释块（删除没留半截）', !!bugSec && JSON.stringify(bugSec).indexOf('开屏偶尔慢') < 0);
   let tplSrc = '';
   try { tplSrc = readFileSync(join(root, 'src/template.html'), 'utf8'); } catch (e) {}
-  ok('离线兜底 template.html 同为新章 + 摘要高亮行（断网/弱网用户也看得到）', tplSrc.indexOf('<p class="splash-sec">开屏偶尔慢一下，是正常的（不是 bug）</p>') >= 0 && tplSrc.indexOf('<p class="splash-hl">开屏 / 打开时偶尔慢几秒是正常的，不是 bug') >= 0);
+  ok('#974 离线兜底 template.html：章标题与摘要高亮行都不在', tplSrc.indexOf('<p class="splash-sec">开屏偶尔慢一下，是正常的（不是 bug）</p>') < 0 && tplSrc.indexOf('<p class="splash-hl">开屏 / 打开时偶尔慢几秒是正常的，不是 bug') < 0);
+  ok('#974 离线兜底：该章 6 条 bullet 一并清除（该章独有句子无残留）', tplSrc.indexOf('先把结论说在前面') < 0 && tplSrc.indexOf('重开等于从头再读一遍') < 0 && tplSrc.indexOf('整站代码') < 0);
 
   console.log('\n== E 样式：解释行有独立规则（小字次级色，不抢加载提示） ==');
   ok('.splash-loading-sub 样式规则已进样式表', /\.splash-loading-sub\s*\{/.test(cssAll));

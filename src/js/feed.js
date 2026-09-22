@@ -874,6 +874,8 @@
       myAvEl.innerHTML = myAvStr ? '<img src="' + attrEsc(myAvStr) + '" alt="">' : '';
       // FIX 2026-09-18 #739：innerHTML 重建会把 label 激活层冲掉，渲染后补挂（幂等）
       try { if (window.mochiFilePickLabel) window.mochiFilePickLabel(myAvEl, feedAvPickInput); } catch (e) {}
+      // FIX 2026-09-21 #1002：同一处补挂「真·可点 input 层」（layers 是按钮的子节点，innerHTML 重建一并冲掉）
+      try { if (window.mochiFilePickSurface) window.mochiFilePickSurface(myAvEl, { id: 'feed-myav-tap', accept: 'image/*', owner: feedAvPickInput }); } catch (e) {}
     }
     if (myNameEl) myNameEl.textContent = myNameStr;
     const cover = document.getElementById('feed-cover');
@@ -1745,6 +1747,11 @@ const comInput = document.getElementById('feed-comment-input');
 const comSend = document.getElementById('feed-comment-send');
 const comSticker = document.getElementById('feed-comment-sticker');
 const comImg = document.getElementById('feed-comment-img');
+// FIX 2026-09-21 #1002（第九波续）：朋友圈各上传入口铺「真·可点 input」层——手指物理落在真 input 上，
+// 选择器由浏览器原生默认动作弹出，不再依赖 label 转发 / JS 合成 click / showPicker 任何一条腿。
+// owner 写统一入口的 input id（那个 input 点按时才建，这里只登记 id、选完文件时才解析），
+// 选中文件转交它并派发 change ⇒ 下面的压缩/落库管线一字未改（同一入口仍只有一条管线）。
+if (comImg && window.mochiFilePickSurface) window.mochiFilePickSurface(comImg, { id: 'feed-com-tap', accept: 'image/*', owner: 'mochi-com-img-pick' });
 // v3.7.x：OPPO Edge 对 ce-box(contenteditable 转换框)聚焦/输入失效——与回复设置
 // stp-val 同源（见 WORKLOG 2026-08 OPPO Edge 修复记录），评论输入框保持原生
 // textarea：预标记 ceDone 让 mobile-adapt.js 转换器跳过（原生仅弹自动填充条，
@@ -2022,7 +2029,11 @@ if (comSticker) comSticker.addEventListener('click', (e) => { e.stopPropagation(
 let comImgBusy = false;
 if (comImg) {
   comImg.addEventListener('click', (e) => {
-    e.preventDefault();
+    // FIX 2026-09-21 #1002：这次点击若落在「真·可点 input 层」上（本入口已铺），**不能再 preventDefault**
+    // ——preventDefault 会取消这次 click 的默认动作，而「弹系统选择器」正是真 input 的默认动作
+    // ⇒ 内核（尤其国产）会照此静默不弹＝用户看到的「点了没反应」。只对非 surface 的点击保留原抑制
+    //（原用途：防移动端选择器关闭后补发的二次 click 重复弹窗）。
+    if (!(e.target && e.target.closest && e.target.closest('input[data-file-pick-surface]'))) e.preventDefault();
     e.stopPropagation();
     if (comImgBusy) return;
     comImgBusy = true;
@@ -2299,6 +2310,8 @@ if (comInput) comInput.addEventListener('keydown', (e) => { if (e.key === 'Enter
   const feedInput = document.getElementById('feed-input');
   if (feedInput) feedInput.dataset.ceDone = '1';
   const pickBtn = document.getElementById('feed-pick-img');
+  // FIX 2026-09-21 #1002：发布框「添加图片」铺真·可点 input 层（owner＝统一入口那个多选 input）
+  if (pickBtn && window.mochiFilePickSurface) window.mochiFilePickSurface(pickBtn, { id: 'feed-pick-tap', accept: 'image/*', multiple: true, owner: 'dev-feed-pick-img' });
   const preview = document.getElementById('feed-preview');
   let pickedImgs = [];
   const MAX_PICK = 9;
@@ -2427,6 +2440,9 @@ if (comInput) comInput.addEventListener('keydown', (e) => { if (e.key === 'Enter
   if (coverAvEl) {
     // FIX 2026-09-18 #738：原生 label 激活兜底（小米浏览器对 JS 合成 click 静默不弹选择器）
     if (window.mochiFilePickLabel) window.mochiFilePickLabel(coverAvEl, feedAvPickInput);
+    // FIX 2026-09-21 #1002：封面头像铺真·可点 input 层（owner＝上面那个 feed-av-pick 常驻 input；
+    // 它的 onchange 管线一字未改，仍负责 256px 压缩 + 落库 + 重绘）
+    if (window.mochiFilePickSurface) window.mochiFilePickSurface(coverAvEl, { id: 'feed-myav-tap', accept: 'image/*', owner: feedAvPickInput });
     coverAvEl.addEventListener('click', (e) => {
       e.stopPropagation();
       // FIX 2026-09-18 #756：原 fromLabel 早退在「label 存在但国产内核不转发」时连 JS 兜底
@@ -2726,6 +2742,8 @@ if (comInput) comInput.addEventListener('keydown', (e) => { if (e.key === 'Enter
     if (feedAllWho === 'me') {
       if (avEl) { const mav = feedUserAv(); avEl.innerHTML = mav ? '<img src="' + attrEsc(mav) + '" alt="">' : ''; }
       if (nameEl) nameEl.textContent = feedUserName();
+      // FIX 2026-09-21 #1002：头像节点被重写后补挂「真·可点 input 层」（幂等，见 device.js）
+      try { if (avEl && window.mochiFilePickSurface) window.mochiFilePickSurface(avEl, { id: 'feed-allav-tap', accept: 'image/*', owner: 'mochi-feed-allav-pick' }); } catch (e) {}
       return;
     }
     const c = (window.getContacts && window.getContacts().find(x => x.id === feedAllCid)) || { name: feedAllCid };
@@ -2739,6 +2757,8 @@ if (comInput) comInput.addEventListener('keydown', (e) => { if (e.key === 'Enter
       avEl.innerHTML = av ? '<img src="' + attrEsc(av) + '" alt="">' : '';
     }
     if (nameEl) nameEl.textContent = c.name || feedAllCid;
+    // FIX 2026-09-21 #1002：同上——重写头像节点后幂等补挂真·可点 input 层
+    try { if (avEl && window.mochiFilePickSurface) window.mochiFilePickSurface(avEl, { id: 'feed-allav-tap', accept: 'image/*', owner: 'mochi-feed-allav-pick' }); } catch (e) {}
   }
   // v3.7.x：全部朋友圈页渲染（从 openFeedAll 拆出，供点赞/评论/回复后局部刷新——
   // 原实现渲染只绑删除/图片，页面上没有评论按钮、点评论也无回复绑定，用户在该页
@@ -2825,6 +2845,10 @@ if (comInput) comInput.addEventListener('keydown', (e) => { if (e.key === 'Enter
   const feedAllCover = document.getElementById('feed-all-cover');
   const feedAllAv = document.getElementById('feed-all-av');
   const feedAllName = document.getElementById('feed-all-name');
+  // FIX 2026-09-21 #1002：全部朋友圈页头像铺真·可点 input 层（owner＝统一入口那个 input id；
+  // 该 input 点按时才建，这里只登记 id）。注意封面容器 #feed-all-cover 内还有头像与昵称两个可点元素，
+  // 不给它铺层（铺了会吞掉头像/昵称的点击）——只铺头像本身。
+  if (feedAllAv && window.mochiFilePickSurface) window.mochiFilePickSurface(feedAllAv, { id: 'feed-allav-tap', accept: 'image/*', owner: 'mochi-feed-allav-pick' });
   if (feedAllCover) {
     feedAllCover.addEventListener('click', (e) => {
       if (feedAllAv && (e.target === feedAllAv || feedAllAv.contains(e.target))) return;

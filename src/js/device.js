@@ -3799,6 +3799,10 @@ window.mochiFilePickGuard = function (input, onMiss) {
   setTimeout(function () {
     if (settled) return;
     if (window.__mochiPickArmed.opened !== openedAt) { cleanup(); settled = true; return; } // label 路径已生效
+    // FIX 2026-09-21 #991（第九波）：本次手势若是「手指物理点按铺在入口上的真 input」（surface 层，
+    // 见 mochiFilePickSurface），浏览器已按原生默认动作弹了选择器——此时再补 JS 腿会在另一个
+    // input 上二次激活（双开），故判定「已弹出」直接让路。判据＝同一手势的时间戳，零机型分支。
+    if (window.mochiFilePickSurfaceTap && window.mochiFilePickSurfaceTap()) { cleanup(); settled = true; return; }
     cleanup();
     finish(false); // 没等到任何信号 → 判定「这次没弹出」，走兜底
   }, 60);
@@ -3815,10 +3819,133 @@ window.mochiFilePickLabel = function (btn, input) {
       label = document.createElement('label');
       label.setAttribute(mark, input.id);
       label.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;margin:0;padding:0;border:0;opacity:0;cursor:pointer;';
-      btn.appendChild(label);
+      // FIX 2026-09-21 #1002：本按钮若已铺「真·可点 input 层」（#991/#1002），label 必须**插在它前面**
+      // ——两者都是 absolute 覆盖层，画序由 DOM 顺序决定；后插的 label 会盖在 surface 上，手指点中的
+      // 就成了 label（国产内核里 label 转发被静默吞掉＝回到「点了没反应」）。插在 surface 之前＝
+      // label 退回原来的兜底角色（surface 才是主路径）；surface 与入口内可点元素（如 .lbl）的相对
+      // 层级不变（#821 仍成立）。
+      var surf = btn.querySelector('input[data-file-pick-surface]');
+      if (surf) btn.insertBefore(label, surf); else btn.appendChild(label);
     }
     label.htmlFor = input.id;
   } catch (e) { /* 兼容助手绝不能成为错误源 */ }
+};
+
+// ===== 第九波 #991：把「真·可点 file input」铺在入口上（物理点按＝浏览器原生行为，零转发、零合成事件）=====
+// 立项（用户 2026-09-21 红米 Note 9 Pro + 手机自带浏览器 MiuiBrowser 20.23 / Android12 / Chrome135 内核
+// 实报「导入图片点不了、一直换不了头像」，并明说其他设备型号也有出现、要求不要覆盖式修补）：
+// 前八波（#677 input 要挂文档 → #717 去掉 display:none → #738 加原生 label → #753 accept 前置 →
+// #755 统一入口 → #756 label 早退把两条路一起掐掉 → #813 回调武装时机 → #877 showPicker 第三腿 →
+// #920 三腿单点）修的一直是「怎么把那个 1px、看不见的 sr-only input 激活起来」，三条腿都得指望内核
+// 配合执行我们的代码：①label 转发（#756 实测 vivo SP-engine 既不转发也不报错）；②JS 合成 click()
+// （#738 实测小米系静默无视）；③showPicker()（小米系仍可能不弹）。三条腿全被无视时＝点了彻底没反应
+// （不报错、不弹窗、不提示），这正是用户反复看到的形状。
+// 本波换掉问题本身：**不再让代码去「激活」一个看不见的 input**，而是在入口节点内铺一层有真实尺寸、
+// 手指能直接落在上面的 file input（透明但占位，不是 sr-only clip）——手指物理点按 input 本身，选择器
+// 由浏览器的**原生默认动作**弹出，不经过 label 转发、也不经过任何 JS 合成事件。这是本族唯一不依赖
+// 「内核乐意执行我们的 JS」的路径（中文移动端「透明 input 覆盖按钮」的通吃写法）。
+// 零机型分支：所有内核都是同一个元素、同一条原生路径，无任何 UA/机型判断。
+// 与既有三腿并存互不干扰：三腿在 mochiFilePickGuard / mochiFilePickFire 里会探测「本次手势正是
+// surface 点按」并主动让路（见上方 #991 判定），因此绝不会两个 input 各弹一次＝不双开。
+// 调用口径：只在**单一用途的常驻入口**（该元素内没有别的按钮）上铺一次，长期有效；不要在点击时临时创建。
+//   opts.id       该 input 的稳定 id（同一 id 复用，绝不随点按堆积节点）
+//   opts.accept   默认 'image/*'（必须在任何激活之前生效，#753 判据；此处是常驻设置，天然先于点按）
+//   opts.multiple 多选（与宿主入口一致）
+//   opts.owner    宿主 input（老路径那个 sr-only input）——选完文件后把 FileList 转交它并派发 change，
+//                 于是**入口自己的压缩/落库管线一字不用改**（同一入口只有一条管线＝不会两边走偏）
+//   opts.onFiles  可选：直接回调（不给 owner 时用；tap 时由 mochiFilePick 登记最新回调，见下）
+// #1002：owner 转发是「一行接入」的关键——各入口的 mochiFilePick({btn,onFiles}) 点击路径与
+// 自建 input 的 onchange 管线都保持原样，surface 只负责「让手指点到真 input」。
+window.mochiFilePickSurface = function (btn, opts) {
+  try {
+    var o = opts || {};
+    if (!btn || !btn.appendChild) return null;
+    var id = o.id || ('mochi-pick-surface-' + Date.now().toString(36));
+    var input = document.getElementById(id);
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'file';
+      input.id = id;
+      input.className = 'mochi-pick-surface';
+      input.setAttribute('data-file-pick-surface', '1');
+      // 元素本身**可见**（opacity:1、有真实尺寸、可命中），只是没有可见外观：原生 file input 的
+      // 大小/内边距/边框/前景色全清掉、字号 0、外观交给 CSS 里的 ::file-selector-button 规则藏按钮。
+      // 这样既不落进「不可见 input 被内核拒绝激活」那族启发式（#717/#738 的 display:none/opacity:0），
+      // 又能让手指物理落在 input 上——本路径要的正是「浏览器原生默认动作」，不靠任何 JS 激活。
+      // z-index:0 ＝ 入口内自己的可点元素（如桌面昵称 .lbl 的 z-index:1，见 #821）仍在其上，
+      // 点昵称＝改昵称、点圆圈/其余区域＝换头像，两条路径各归各。
+      input.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;margin:0;padding:0;border:0;outline:none;background:transparent;color:transparent;font-size:0;appearance:none;-webkit-appearance:none;cursor:pointer;z-index:0;';
+      // 入口必须是定位祖先，否则这层 100%×100% 的覆盖层会以**初始包含块**（＝整屏）为基准
+      // ⇒ 变成一张全屏透明 input 把页面所有点击都吃掉（实测：页面背景行是先在游离态创建、
+      // 之后才挂进文档的，此时 getComputedStyle().position 拿到的是空串而不是 'static'，
+      // 只判 === 'static' 会漏掉这一形态）。故这里改成「非绝对/非固定/非相对/非粘性就补 relative」，
+      // 游离节点与已挂载节点一视同仁。
+      var _pos = '';
+      try { _pos = getComputedStyle(btn).position || ''; } catch (e3) {}
+      if (_pos !== 'absolute' && _pos !== 'fixed' && _pos !== 'relative' && _pos !== 'sticky') btn.style.position = 'relative';
+      btn.appendChild(input);
+      // 记「本次手势点到了 surface」——供 guard/Fire 让路（同一手势内的时间戳判定，非机型分支）
+      input.addEventListener('click', function () {
+        window.__mochiSurfaceTapAt = Date.now();
+        // #1002：再校一次入口定位——若入口在「装层之后」被 cssText 整体覆盖过 inline 样式
+        //（position:relative 被抹掉），这一层会退回以初始包含块（＝整屏）为基准的形态。
+        // 点击这一刻节点必然已挂进文档，这里能拿到真实计算值；补回定位＝下一次点按仍然命中这层。
+        try {
+          var bp = getComputedStyle(btn).position;
+          if (bp === 'static' || bp === '') btn.style.position = 'relative';
+        } catch (e4) {}
+      }, true);
+      input.__mochiSurface = { owner: null, onFiles: null };
+    }
+    try { input.accept = o.accept || 'image/*'; } catch (e) {}
+    input.multiple = !!o.multiple;
+    var rec = input.__mochiSurface = input.__mochiSurface || { owner: null, onFiles: null };
+    if (o.owner) rec.owner = o.owner;
+    if (typeof o.onFiles === 'function') rec.onFiles = o.onFiles;
+    input.onchange = function () {
+      var files = Array.prototype.slice.call(input.files || []);
+      try { input.value = ''; } catch (e) {} // 允许重选同一文件
+      if (!files.length) return;
+      // ① 直接回调（入口自建管线的入口 / tap 时由 mochiFilePick 登记的最新回调）
+      if (typeof rec.onFiles === 'function') { try { rec.onFiles(files); } catch (e) {} return; }
+      // ② 转交宿主 input：沿用入口原有 onchange 管线（零改动接入）。
+      //    owner 允许写成 id 字符串 —— 统一入口（mochiFilePick）的 input 是点按时才建的，
+      //    接入侧在绑定/渲染时只能知道它的 id，故到这里再解析（选完文件时它必然已存在）。
+      var owner = rec.owner;
+      if (typeof owner === 'string') { try { owner = document.getElementById(owner); } catch (e2) { owner = null; } }
+      if (!owner) return;
+      try {
+        var dt = new DataTransfer();
+        for (var i = 0; i < files.length; i++) dt.items.add(files[i]);
+        owner.files = dt.files;
+        owner.dispatchEvent(new Event('change'));
+      } catch (e) {
+        if (window.toast) { try { toast('浏览器不支持这种方式选择图片，请改用 Chrome 或 Edge 打开'); } catch (x) {} }
+      }
+    };
+    return input;
+  } catch (e) { return null; }
+};
+// 供 guard/Fire 判定「本次手势是一次 surface 点按」：一次性消费（读到即清），窗口 400ms＝同一手势，
+// 避免上一次点按的残留把下一次点按的补腿误吞。
+window.mochiFilePickSurfaceTap = function () {
+  var at = window.__mochiSurfaceTapAt || 0;
+  window.__mochiSurfaceTapAt = 0;
+  return (Date.now() - at) < 400;
+};
+// #1002：按宿主 input 找它已经铺好的所有 surface（同一宿主可能对应多个触发按钮，例如
+// 聊天壁纸在「设置页面板」和「边看边调抽屉」各一个按钮）——mochiFilePick 在点击路径里用它把
+// 本次的 onFiles 接到全部同宿主的层上，任一按钮被点都能拿到正确的回调。
+window.mochiFilePickSurfaceAll = function (input) {
+  var out = [];
+  try {
+    var all = document.querySelectorAll('input[data-file-pick-surface]');
+    for (var i = 0; i < all.length; i++) {
+      var rec = all[i].__mochiSurface;
+      if (rec && (rec.owner === input || (typeof rec.owner === 'string' && rec.owner === input.id))) out.push(all[i]);
+    }
+  } catch (e) {}
+  return out;
 };
 
 // ===== 激活腿统一实现（FIX 2026-09-20 #920 第八波）——showPicker → click → 可反馈提示 =====
@@ -3837,6 +3964,9 @@ window.mochiFilePickLabel = function (btn, input) {
 // 零机型分支：所有内核同一顺序尝试三条腿，判据全是可观测事实（无机型/UA 判断）。
 window.mochiFilePickFire = function (input, opts) {
   var o = opts || {};
+  // FIX 2026-09-21 #991（第九波）：本次手势若是「手指物理点按入口上铺的真 input」（surface 层），
+  // 那台选择器已由浏览器原生默认动作弹出——这里只登记、不再补腿（补＝另一个 input 再弹一次＝双开）。
+  if (window.mochiFilePickSurfaceTap && window.mochiFilePickSurfaceTap()) return true;
   var fired = false;
   if (input && typeof input.showPicker === 'function') {
     try { input.showPicker(); fired = true; } catch (e) {}
@@ -3890,6 +4020,15 @@ window.mochiFilePick = function (opts) {
   // 原生 label 激活层（部分分叉内核忽略 JS 合成 click；注意 #756 实测：label 在国产内核上
   // 也可能既不转发也不报错，故它只是「加速路径」，真正的兜底见下方 activate()）
   if (o.btn && window.mochiFilePickLabel) window.mochiFilePickLabel(o.btn, input);
+  // FIX 2026-09-21 #1002：若这个入口已经铺过 surface（真·可点 input 层），把**本次点击路径产出的
+  // onFiles 回调登记到那层上**——surface 收到文件时直接调它，于是入口侧「点击时才算出来的管线」
+  // （列表/索引/时长等闭包变量）与 surface 选中的文件严丝合缝，接入侧仍只需在绑定/渲染处铺一行。
+  if (o.btn && window.mochiFilePickSurfaceAll && typeof o.onFiles === 'function') {
+    try {
+      var surfs = window.mochiFilePickSurfaceAll(input);
+      for (var si = 0; si < surfs.length; si++) { surfs[si].__mochiSurface.onFiles = o.onFiles; }
+    } catch (e) {}
+  }
   // ★ 激活：不再「有 label 就跳过 JS click」（那是 #738~#755 整族复发的根源，见上方 #756 说明）。
   // 统一走 mochiFilePickGuard —— 先给原生转发一个窗口期，只有确认「没弹出选择器」才补 JS click。
   // FIX 2026-09-20 #920：兜底腿由「裸 click()」换成全站统一的 mochiFilePickFire（showPicker→click
@@ -3897,9 +4036,17 @@ window.mochiFilePick = function (opts) {
   var activate = function () {
     window.mochiFilePickFire(input, { onFail: function () { if (o.onError) { try { o.onError(); } catch (x) {} } } });
   };
+  // #1002：本次手势若正是点在这层 surface 上（入口已铺），远端已由浏览器原生弹出选择器——
+  // 不再补腿，避免与 surface 各弹一次。判据同上（同一手势时间戳，一次性消费）。
+  if (!o.noClick && window.mochiFilePickSurfaceTap && window.mochiFilePickSurfaceTap()) {
+    if (window.mochiFilePickGuard) window.mochiFilePickGuard(input, function () {}); // 仍登记一次武装（诊断口径 seq 不变）
+    return input;
+  }
   if (!o.noClick) {
     if (o.btn && window.mochiFilePickGuard) window.mochiFilePickGuard(input, activate);
     else activate();
   }
   return input;
 };
+
+// ===== 统一文件选择入口（FIX 2026-09-18 #755）——同族第五波根治 =====

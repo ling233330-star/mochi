@@ -1097,6 +1097,7 @@
           '· 前缀序号：<b>07-战车.png</b><br>' +
           '· 纯编号：塔罗 <b>00–77</b>、雷诺曼 <b>1–36/40</b>（同名跨体系按当前页签；塔罗编号从 0 起，如你的素材从 1 开始请开下方「编号从 1 起」）<br>' +
           '未识别的文件会列出来，其余照常导入。</div>' +
+        '<div class="divf-hint" id="divf-batch-hint">选不了多张或点了没反应，是浏览器 / 所在 App 的限制：换 Chrome / Edge 再试（详见 使用说明第 13 节）</div>' +
       '</div>' +
       '<div class="divf-scroll">' +
         '<div data-fpanel-body="manage">' +

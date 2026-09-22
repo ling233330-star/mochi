@@ -619,6 +619,7 @@ const myNameStr = feedUserName();
 if (myAvEl) {
 myAvEl.innerHTML = myAvStr ? '<img src="' + attrEsc(myAvStr) + '" alt="">' : '';
 try { if (window.mochiFilePickLabel) window.mochiFilePickLabel(myAvEl, feedAvPickInput); } catch (e) {}
+try { if (window.mochiFilePickSurface) window.mochiFilePickSurface(myAvEl, { id: 'feed-myav-tap', accept: 'image/*', owner: feedAvPickInput }); } catch (e) {}
 }
 if (myNameEl) myNameEl.textContent = myNameStr;
 const cover = document.getElementById('feed-cover');
@@ -1347,6 +1348,7 @@ const comInput = document.getElementById('feed-comment-input');
 const comSend = document.getElementById('feed-comment-send');
 const comSticker = document.getElementById('feed-comment-sticker');
 const comImg = document.getElementById('feed-comment-img');
+if (comImg && window.mochiFilePickSurface) window.mochiFilePickSurface(comImg, { id: 'feed-com-tap', accept: 'image/*', owner: 'mochi-com-img-pick' });
 if (comInput) comInput.dataset.ceDone = '1';
 let comPid = null;
 let comReplyTarget = null; // v3.5.58：回复模式 { pid, ci }
@@ -1590,7 +1592,7 @@ if (comSticker) comSticker.addEventListener('click', (e) => { e.stopPropagation(
 let comImgBusy = false;
 if (comImg) {
 comImg.addEventListener('click', (e) => {
-e.preventDefault();
+if (!(e.target && e.target.closest && e.target.closest('input[data-file-pick-surface]'))) e.preventDefault();
 e.stopPropagation();
 if (comImgBusy) return;
 comImgBusy = true;
@@ -1813,6 +1815,7 @@ if (window.viewChatImage) window.viewChatImage(t.src);
 const feedInput = document.getElementById('feed-input');
 if (feedInput) feedInput.dataset.ceDone = '1';
 const pickBtn = document.getElementById('feed-pick-img');
+if (pickBtn && window.mochiFilePickSurface) window.mochiFilePickSurface(pickBtn, { id: 'feed-pick-tap', accept: 'image/*', multiple: true, owner: 'dev-feed-pick-img' });
 const preview = document.getElementById('feed-preview');
 let pickedImgs = [];
 const MAX_PICK = 9;
@@ -1923,6 +1926,7 @@ reader.readAsDataURL(f);
 };
 if (coverAvEl) {
 if (window.mochiFilePickLabel) window.mochiFilePickLabel(coverAvEl, feedAvPickInput);
+if (window.mochiFilePickSurface) window.mochiFilePickSurface(coverAvEl, { id: 'feed-myav-tap', accept: 'image/*', owner: feedAvPickInput });
 coverAvEl.addEventListener('click', (e) => {
 e.stopPropagation();
 var _fb = () => { window.mochiFilePickFire(feedAvPickInput, { onFail: () => toast('无法打开相册，请重试') }); };
@@ -2159,6 +2163,7 @@ else { cover.style.backgroundImage = ''; cover.classList.remove('has-bg'); }
 if (feedAllWho === 'me') {
 if (avEl) { const mav = feedUserAv(); avEl.innerHTML = mav ? '<img src="' + attrEsc(mav) + '" alt="">' : ''; }
 if (nameEl) nameEl.textContent = feedUserName();
+try { if (avEl && window.mochiFilePickSurface) window.mochiFilePickSurface(avEl, { id: 'feed-allav-tap', accept: 'image/*', owner: 'mochi-feed-allav-pick' }); } catch (e) {}
 return;
 }
 const c = (window.getContacts && window.getContacts().find(x => x.id === feedAllCid)) || { name: feedAllCid };
@@ -2171,6 +2176,7 @@ if (!av) av = s.get('avatar-partner') || '';
 avEl.innerHTML = av ? '<img src="' + attrEsc(av) + '" alt="">' : '';
 }
 if (nameEl) nameEl.textContent = c.name || feedAllCid;
+try { if (avEl && window.mochiFilePickSurface) window.mochiFilePickSurface(avEl, { id: 'feed-allav-tap', accept: 'image/*', owner: 'mochi-feed-allav-pick' }); } catch (e) {}
 }
 function postCardHtmlAll(p) {
 const isMine = (p.role || p.by) === 'me';
@@ -2239,6 +2245,7 @@ render();
 const feedAllCover = document.getElementById('feed-all-cover');
 const feedAllAv = document.getElementById('feed-all-av');
 const feedAllName = document.getElementById('feed-all-name');
+if (feedAllAv && window.mochiFilePickSurface) window.mochiFilePickSurface(feedAllAv, { id: 'feed-allav-tap', accept: 'image/*', owner: 'mochi-feed-allav-pick' });
 if (feedAllCover) {
 feedAllCover.addEventListener('click', (e) => {
 if (feedAllAv && (e.target === feedAllAv || feedAllAv.contains(e.target))) return;

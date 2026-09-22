@@ -1622,8 +1622,6 @@
     btn.innerHTML = '☆ 心愿单' + (n ? '<i class="wish-badge">' + n + '</i>' : '');
   }
   // #797：回填完成补渲——只重画当前开着的两个礼物面（giftPanelRerender/renderMarket 均现读现画幂等）
-  // #985 审查补：导入备份/回填完成会整份换掉心意柜存储，卡片状态（领取态/回复）的那张记忆化表必须作废，
-  // 否则礼物卡还在拿导入前的心意柜数据渲染——用户视角「导入后回复/已领取不见了」。
   if (window.mochiOnDataReady) window.mochiOnDataReady(function () {
     try { boxMetaInvalidate(); } catch (e) {}   // #985：导入回填后卡片状态按新存储重读
     try { const gp = document.getElementById('chat-gift-panel'); if (gp && !gp.hidden) giftPanelRerender(); } catch (e) {}
@@ -2021,7 +2019,7 @@
         '<div class="market-hero">' +
 
           '<div class="market-hero-title">心意市集</div>' +
-          '<div class="market-hero-sub">挑一份心意，跨越两个世界送给你</div>' +
+          '<div class="market-hero-sub">挑一份心意，跨越两个世界送给 TA</div>' +
           '<div class="market-balance" id="market-balance"></div>' +
         '</div>' +
         '<div class="market-mine" id="market-mine"></div>' +
@@ -2134,9 +2132,6 @@
     // FIX 2026-09-15 #540：切联系人后立即重写心意市集/心意柜里写死过名字的静态文案；
     // 页面若正开着顺带重渲（数据列表走动态 store 已隔离，重渲只为文案与列表同时落到新桌面）。
     document.addEventListener('contact-switched', function () {
-      // #985 审查补：卡片状态（领取态/回复）的记忆化表是按「当时那个桌面」的心意柜建的——切桌面后
-      // 必须作废，否则切过去的那个桌面上，未领取的礼物卡不显示【领取】、已回复的卡也不显示回复
-      //（用户视角：「换了联系人回来，新到的礼物没有领取按钮」）。id 全局唯一，但表是按桌面查的。
       try { boxMetaInvalidate(); } catch (e) {}   // #985：切桌面后卡片状态按新桌面重读
       try { syncGiftNames(); } catch (e) {}
       try { if (giftboxPage && !giftboxPage.hidden) renderBox(); } catch (e) {}

@@ -89,11 +89,8 @@ avatarPickInput.type = 'file'; avatarPickInput.accept = 'image/*';
 avatarPickInput.id = 'mochi-avatar-pick';
 avatarPickInput.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:1;margin:0;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;';
 document.body.appendChild(avatarPickInput);
-avatarPickInput.onchange = () => {
-const f = avatarPickInput.files && avatarPickInput.files[0];
-avatarPickInput.value = ''; // 允许重选同一文件
+function avatarPickFile(f, cb) {
 if (!f) return;
-const cb = avatarPickCb; avatarPickCb = null;
 const reader = new FileReader();
 reader.onload = () => {
 compressImage(reader.result, 256).then(data => {
@@ -102,15 +99,20 @@ if (cb) cb(data);
 });
 };
 reader.readAsDataURL(f);
+}
+avatarPickInput.onchange = () => {
+const f = avatarPickInput.files && avatarPickInput.files[0];
+avatarPickInput.value = ''; // 允许重选同一文件
+if (!f) return;
+const cb = avatarPickCb; avatarPickCb = null;
+avatarPickFile(f, cb);
 };
 function bindAvatar(id, key) {
 const box = document.getElementById(id);
 if (!box) return;
 applyAvatar(id, key);
 if (window.mochiFilePickLabel) window.mochiFilePickLabel(box, avatarPickInput);
-box.addEventListener('click', (e) => {
-e.stopPropagation();
-avatarPickCb = (data) => {
+const applyData = (data) => {
 const ring = box.querySelector('.ring');
 if (ring) {
 ring.innerHTML = '';
@@ -121,6 +123,16 @@ ring.appendChild(img);
 }
 store.set(key, data);
 };
+if (window.mochiFilePickSurface) {
+window.mochiFilePickSurface(box, {
+id: 'mochi-avatar-tap-' + id,
+accept: 'image/*',
+onFiles: (files) => { avatarPickFile(files && files[0], applyData); }
+});
+}
+box.addEventListener('click', (e) => {
+e.stopPropagation();
+avatarPickCb = applyData;
 var _fallback = () => { window.mochiFilePickFire(avatarPickInput, { onFail: () => { avatarPickCb = null; toast('无法打开相册，请重试'); } }); };
 if (window.mochiFilePickGuard) window.mochiFilePickGuard(avatarPickInput, _fallback);
 else _fallback();
@@ -987,6 +999,7 @@ wrap.appendChild(strip);
 const upBtn = document.createElement('button');
 upBtn.textContent = '＋ 上传新图（可多选）';
 upBtn.style.cssText = 'width:100%;padding:11px;border:none;border-radius:10px;background:var(--ink,#111);color:var(--bg-b,#fff);font-size:14px;font-weight:600;margin-bottom:8px';
+if (window.mochiFilePickSurface) window.mochiFilePickSurface(upBtn, { id: 'phone-bg-up-tap', accept: 'image/*', multiple: true, owner: 'mochi-phonebg-gallery-pick' });
 upBtn.addEventListener('click', () => {
 window.mochiFilePick({
 id: 'mochi-phonebg-gallery-pick', accept: 'image/*', multiple: true, btn: upBtn,
@@ -1011,6 +1024,11 @@ if (document.getElementById('phone-bg-gallery-panel') && document.getElementById
 });
 });
 wrap.appendChild(upBtn);
+const bgHint = document.createElement('div');
+bgHint.id = 'phonebg-upload-hint';
+bgHint.style.cssText = 'font-size:11px;line-height:1.6;color:var(--muted);margin:2px 0 8px';
+bgHint.textContent = '选不了多张或点了没反应，是浏览器 / 所在 App 的限制：换 Chrome / Edge 再试（详见 使用说明第 13 节）';
+wrap.appendChild(bgHint);
 if (cur) {
 const rmBtn = document.createElement('button');
 rmBtn.textContent = '清除当前壁纸（图库保留）';
@@ -1800,7 +1818,28 @@ bind('dq-bg', 'row-bg-preset');
 bind('dq-radius', 'row-desk-card-radius');
 bind('dq-tabbar', 'row-tabbar-beauty'); // #769：底部栏直达
 })();
-let beautyDockTop = null;
+let beautyDockBot = null;
+function beautyDrawerReserve() {
+try {
+const tb = document.querySelector('.tabbar');
+const t = tb && tb.getBoundingClientRect();
+if (t && t.height && t.top > 0) return Math.max(14, Math.round(window.innerHeight - t.top + 8));
+} catch (e) {}
+return 14;
+}
+function beautyDrawerApplyBottom() {
+const d = document.getElementById('beauty-drawer');
+if (!d) return;
+d.style.bottom = (beautyDockBot == null ? beautyDrawerReserve() : beautyDockBot) + 'px';
+}
+let beautyDockObs = null;
+function watchBeautyDockPages() {
+if (beautyDockObs || !('MutationObserver' in window)) return;
+try {
+beautyDockObs = new MutationObserver(function () { if (beautyDockBot == null) beautyDrawerApplyBottom(); });
+document.querySelectorAll('.page').forEach(function (p) { beautyDockObs.observe(p, { attributes: true, attributeFilter: ['hidden'] }); });
+} catch (e) { beautyDockObs = null; }
+}
 const openBeautyDrawer = (secKey) => {
 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
 const phoneTab = document.querySelector('.tab[data-page="page-phone"]');
@@ -1814,7 +1853,7 @@ d = document.createElement('div');
 d.id = 'beauty-drawer';
 document.body.appendChild(d);
 }
-d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:95;max-height:40vh;background:var(--card-bg,#fff);background:color-mix(in srgb, var(--card-bg,#fff) 72%, transparent);color:var(--ink,#111);box-shadow:0 -6px 24px rgba(0,0,0,.18);border-radius:16px 16px 0 0;overflow-y:auto;overflow-x:hidden;padding:0 12px calc(10px + var(--mochi-safe-bottom,env(safe-area-inset-bottom,0px)));box-sizing:border-box;display:flex;flex-direction:column;gap:8px';
+d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:95;max-height:40vh;transition:bottom .16s ease;background:var(--card-bg,#fff);background:color-mix(in srgb, var(--card-bg,#fff) 72%, transparent);color:var(--ink,#111);box-shadow:0 -6px 24px rgba(0,0,0,.18);border-radius:16px 16px 0 0;overflow-y:auto;overflow-x:hidden;padding:0 12px calc(10px + var(--mochi-safe-bottom,env(safe-area-inset-bottom,0px)));box-sizing:border-box;display:flex;flex-direction:column;gap:8px';
 d.innerHTML = '';
 const grip = document.createElement('div');
 grip.style.cssText = 'width:36px;height:4px;border-radius:2px;background:var(--card-border,#ddd);margin:7px auto 0;flex:none';
@@ -1830,7 +1869,10 @@ const hd = document.createElement('div');
 hd.style.cssText = 'display:flex;align-items:center;gap:8px;flex:none';
 const hdTxt = document.createElement('span');
 hdTxt.textContent = '边看边调（即时生效）';
-hdTxt.style.cssText = 'font-size:13px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+hdTxt.style.cssText = 'font-size:13px;font-weight:700;flex:none';
+const hdHint = document.createElement('span');
+hdHint.textContent = '按住标题行上下拖 · 让开看桌面';
+hdHint.style.cssText = 'font-size:11px;color:var(--muted,#888);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
 const panelBody = document.createElement('div');
 panelBody.style.cssText = 'display:flex;flex-direction:column;gap:8px;flex:none';
 const body = document.createElement('div');
@@ -1841,8 +1883,39 @@ panelBody.style.display = willFold ? 'none' : 'flex';
 foldBtn.textContent = willFold ? '展开' : '收起';
 });
 const closeBtn = mkMini('\u2715', () => { d.style.display = 'none'; showThemePage(); }, ';padding:4px 8px');
-hd.appendChild(hdTxt); hd.appendChild(foldBtn); hd.appendChild(closeBtn);
+hd.appendChild(hdTxt); hd.appendChild(hdHint); hd.appendChild(foldBtn); hd.appendChild(closeBtn);
 d.appendChild(hd);
+const bindDrawerDrag = (el) => {
+el.style.touchAction = 'none';
+el.style.cursor = 'grab';
+let sy = 0, sb = 0, drag = false;
+el.addEventListener('pointerdown', (e) => {
+if (e.target.closest('button')) return;
+if (e.pointerType === 'mouse' && e.button !== 0) return;
+drag = true; sy = e.clientY;
+sb = beautyDockBot == null ? beautyDrawerReserve() : beautyDockBot;
+d.style.transition = 'none';
+try { el.setPointerCapture(e.pointerId); } catch (er) {}
+e.preventDefault();
+});
+el.addEventListener('pointermove', (e) => {
+if (!drag) return;
+beautyDockBot = Math.max(0, Math.min(Math.round(window.innerHeight * 0.6), Math.round(sb + sy - e.clientY)));
+beautyDrawerApplyBottom();
+e.preventDefault();
+});
+const up = () => {
+if (!drag) return;
+drag = false;
+d.style.transition = 'bottom .16s ease';
+if ((beautyDockBot || 0) <= beautyDrawerReserve() + 6) beautyDockBot = null; // 拖回自动位＝吸附复位
+beautyDrawerApplyBottom();
+};
+el.addEventListener('pointerup', up);
+el.addEventListener('pointercancel', up);
+};
+bindDrawerDrag(grip);
+bindDrawerDrag(hd); // grip 只有 4px 高，标题行才是主拖拽把手
 const chipsRow = document.createElement('div');
 chipsRow.style.cssText = 'display:flex;gap:6px;flex:none';
 panelBody.appendChild(chipsRow);
@@ -2109,14 +2182,20 @@ return wrap;
 } }
 ];
 let activeSec = 'color';
-const renderSec = (key) => {
-activeSec = key;
+const paintChips = (key) => {
 Array.prototype.forEach.call(chipsRow.children, c => {
 const on = c.dataset.sec === key;
-c.style.background = on ? 'var(--ink,#111)' : 'var(--btn-cancel-bg,#fafafa)';
-c.style.color = on ? 'var(--bg-b,#fff)' : 'var(--ink,#111)';
-c.style.borderColor = on ? 'var(--ink,#111)' : 'var(--card-border,#ddd)';
+const bg = on ? 'var(--ink,#111)' : 'var(--btn-cancel-bg,#fafafa)';
+if (c.style.background !== bg) c.style.background = bg;
+const fg = on ? 'var(--bg-b,#fff)' : 'var(--ink,#111)';
+if (c.style.color !== fg) c.style.color = fg;
+const bd = on ? 'var(--ink,#111)' : 'var(--card-border,#ddd)';
+if (c.style.borderColor !== bd) c.style.borderColor = bd;
 });
+};
+const renderSec = (key) => {
+activeSec = key;
+paintChips(key);
 body.innerHTML = '';
 paletteHost = null;
 colorItems = [];
@@ -2133,8 +2212,15 @@ chipsRow.appendChild(c);
 });
 renderSec(activeSec);
 if (secKey) renderSec(secKey);
+beautyDrawerApplyBottom();
 d.style.display = 'flex';
+watchBeautyDockPages();
+if (window.requestAnimationFrame) requestAnimationFrame(() => { if (beautyDockBot == null) beautyDrawerApplyBottom(); });
 };
+try {
+window.addEventListener('resize', () => { if (beautyDockBot == null) beautyDrawerApplyBottom(); });
+if (window.visualViewport) window.visualViewport.addEventListener('resize', () => { if (beautyDockBot == null) beautyDrawerApplyBottom(); });
+} catch (e) {}
 const showThemePage = () => {
 try {
 document.querySelectorAll('.page').forEach(pg => pg.hidden = true);
@@ -2204,7 +2290,7 @@ const kw = inp.value.trim();
 if (!kw) return;
 if (typeof window.mochiFeatureHubOpen === 'function') window.mochiFeatureHubOpen(kw);
 });
-const SEC_NAME = { basic: '通用', chat: '聊天', system: '系统', tools: '工具', about: '关于' };
+const SEC_NAME = { basic: '通用', chat: '聊天', system: '系统', tools: '工具', diag: '信息诊断', about: '关于' };
 const KW = {
 '联系人 / 桌面': '切换桌面 多桌面 独立 称呼',
 '开启群聊': '多人聊天 群',
@@ -2220,13 +2306,13 @@ const KW = {
 '应用锁': '密码 锁 隐私',
 '开屏问答门': '问答 暗号 验证 提问',
 '手机布局': '布局 适配 模式',
-'离线消息提醒': '通知 推送 通知提醒 新消息',
+'离线消息提醒': '通知 推送 通知提醒 新消息 安卓 电脑 主屏幕 iPhone Chrome Edge',
 '使用说明': '教程 帮助 常见问题 安装',
 '导出数据': '备份 保存 导出',
 '导入数据': '恢复 还原 迁移 换机',
 '修改摸鱼天数': '恢复 找回 补回 归零 重来 已摸鱼',
 '设备兼容诊断': '诊断 兼容 报错 环境',
-'顶部避让修正': '安全区 白带 重叠 刘海',
+'顶部避让修正': '安全区 白带 重叠 刘海 添加到主屏幕 独立应用 电脑',
 '屏幕适配诊断': '适配 屏幕 空白 裁切',
 '屏幕适配微调': '微调 字号 文字大小 放大 变小 偏移 遮挡 裁切 留白 白带 状态栏 手势条 屏幕错位 位置',
 '功能诊断': '检测 测试',
@@ -3631,6 +3717,76 @@ tabs.forEach(t => { t.classList.toggle('active', t.dataset.tab === name); });
 tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.tab)));
 show(tabs[0] ? tabs[0].dataset.tab : 'basic');
 })();
+(function initUseMark() {
+const page = document.getElementById('page-setting');
+if (!page) return;
+const d = window.mochiDevice || {};
+const isIOS = function () { return d.isIOS === true; };
+const hasNotify = function () { try { return 'Notification' in window; } catch (e) { return false; } };
+const isIosStandalone = function () {
+if (!isIOS()) return false;
+if (document.documentElement.classList.contains('ios-pwa-standalone')) return true;
+try {
+return navigator.standalone === true ||
+!!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+} catch (e) { return false; }
+};
+const RULES = [
+{ input: 'bg-notify', off: function () {
+if (isIOS()) return { text: '本机是 iPhone / iPad：网页拿不到系统通知（添加到主屏幕也不保证），请改用应用内横幅「桌面消息弹窗」。', go: '#desk-msg-en', goText: '去开启' };
+if (!hasNotify()) return { text: '本机浏览器没有通知能力（小米 / vivo / OPPO 等自带浏览器、UC、夸克常见如此）：请改用 Chrome / Edge 打开本站，安卓或电脑都行。' };
+return null;
+} },
+{ input: 'safe-top-force', off: function () {
+if (isIosStandalone()) return null; // 本机就是它要修的形态
+if (isIOS()) return { text: '本项只在「添加到主屏幕」后打开（独立应用形态）才生效：浏览器里直接打开时开关无效果，顶部遮挡 / 底部裁切请用「屏幕适配微调」。', go: '#row-screen-adj', goText: '去调整' };
+return { text: '本项只修 iPhone / iPad 独立应用形态的顶部避让（安卓没有这个形态）：安卓要调顶部遮挡 / 底部裁切请用「屏幕适配微调」。', go: '#row-screen-adj', goText: '去调整' };
+} }
+];
+function jumpTo(sel) {
+const target = document.querySelector(sel);
+if (!target) return;
+const row = (target.closest && target.closest('.set-row, .gs-row')) || target;
+const si = document.getElementById('set-search-input');
+if (si && si.value) {
+si.value = '';
+try { si.dispatchEvent(new Event('input')); } catch (e) {}
+}
+const sec = row.closest ? row.closest('.them-sec') : null;
+if (sec && sec.hidden) {
+const tab = document.querySelector('#set-tabs .them-tab[data-tab="' + (sec.dataset.sec || '') + '"]');
+if (tab) tab.click();
+}
+try { row.scrollIntoView({ block: 'center' }); } catch (e) {}
+row.classList.add('plat-flash');
+setTimeout(function () { row.classList.remove('plat-flash'); }, 1500);
+}
+RULES.forEach(function (rule) {
+const inp = document.getElementById(rule.input);
+if (!inp) return;
+const row = inp.closest('.set-row, .gs-row');
+if (!row) return;
+let alt = null;
+try { alt = rule.off(); } catch (e) { alt = null; }
+if (!alt) return;
+row.classList.add('plat-off');
+const hint = document.createElement('div');
+hint.className = 'gs-sub plat-hint';
+hint.textContent = alt.text;
+if (alt.go) {
+const go = document.createElement('span');
+go.className = 'plat-go';
+go.setAttribute('role', 'button');
+go.setAttribute('tabindex', '0');
+go.textContent = alt.goText || '去设置';
+const fire = function (e) { if (e) { e.preventDefault(); e.stopPropagation(); } jumpTo(alt.go); };
+go.addEventListener('click', fire);
+go.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') fire(e); });
+hint.appendChild(go);
+}
+if (row.parentNode) row.parentNode.insertBefore(hint, row.nextSibling);
+});
+})();
 (function initGuideNav() {
 const page = document.getElementById('page-guide');
 const row = document.getElementById('row-guide');
@@ -4523,6 +4679,7 @@ if (phonePageEl) {
 phonePageEl.addEventListener('click', (e) => {
 if (!phonePageEl.classList.contains('decor-on')) return;
 if (e.target.closest('.desk-lib') || e.target.closest('.decor-bar') || e.target.closest('.desk-page-add')) return;
+if (e.target.closest('.deco-avatar')) return;
 const card = e.target.closest('[data-card-bg]');
 if (!card) return;
 e.preventDefault();
@@ -4729,6 +4886,7 @@ val.textContent = bg ? '已设置' : '';
 };
 syncRowUI();
 row.appendChild(ico); row.appendChild(txt); row.appendChild(val);
+if (window.mochiFilePickSurface) window.mochiFilePickSurface(row, { id: 'page-bg-tap-' + i, accept: 'image/*', owner: 'mochi-page-bg-pick' });
 row.addEventListener('click', () => {
 const bg = store.get('page-bg-' + i);
 const pickPageBg = () => {
@@ -6329,14 +6487,25 @@ staticText: HINT
 })();
 (function () {
 const AXES = [
-{ k: 'top', name: '顶部', min: -80, max: 80, hint: '顶部内容被状态栏遮挡=往正拖；离得太远=往负拖' },
-{ k: 'bottom', name: '底部', min: -80, max: 80, hint: '底部被手势条裁掉=往正拖；悬空离底太远=往负拖' },
-{ k: 'h', name: '页面高度', min: -80, max: 80, hint: '页面底部留白=往正撑满；内容超出屏幕被裁=往负收短' },
-{ k: 'desk', name: '桌面图标区', min: -60, max: 60, hint: '全屏时桌面图标/按钮整体偏上=往正拉回' },
-{ k: 'shift', name: '整体位移', min: -60, max: 60, hint: '整页位置偏了：正=整页下移、负=上移' },
-{ k: 'text', name: '文字大小', min: 0, max: 12, hint: '聊天气泡/输入框/设置列表等正文文字整体加大（只放大文字组，非整页缩放）；0=默认' },
-{ k: 'side', name: '左右安全边', min: 0, max: 12, hint: '曲面屏/瀑布屏内容贴到屏幕弧边=往正加（两侧同时内收）；0=默认' }
+{ k: 'top', name: '顶部', min: -80, max: 80, group: 'pos', hint: '顶部内容被状态栏遮挡=往正拖；离得太远=往负拖' },
+{ k: 'bottom', name: '底部', min: -80, max: 80, group: 'pos', hint: '底部被手势条裁掉=往正拖；悬空离底太远=往负拖' },
+{ k: 'h', name: '页面高度', min: -80, max: 80, group: 'pos', hint: '页面底部留白=往正撑满；内容超出屏幕被裁=往负收短' },
+{ k: 'shift', name: '整体位移', min: -60, max: 60, group: 'pos', hint: '整页位置偏了：正=整页下移、负=上移' },
+{ k: 'side', name: '左右安全边', min: 0, max: 12, group: 'pos', hint: '曲面屏/瀑布屏内容贴到屏幕弧边=往正加（两侧同时内收）；0=默认' },
+{ k: 'desk', name: '桌面图标区', min: -60, max: 60, group: 'desk', hint: '全屏时桌面图标/按钮整体偏上=往正拉回（只影响桌面页）' },
+{ k: 'text', name: '文字大小', min: 0, max: 12, group: 'text', hint: '聊天气泡/输入框/设置列表等正文文字整体加大（只放大文字组，非整页缩放）；0=默认' }
 ];
+const AXIS_GROUPS = {
+pos: '通用位置轴（桌面 / 聊天 / 设置都生效）',
+desk: '只影响「桌面页」',
+text: '只影响「聊天页」正文文字（气泡 / 输入框）'
+};
+function groupIsCurrent(g) {
+const nm = adjPageName();
+if (g === 'desk') return nm === '桌面';
+if (g === 'text') return nm === '聊天' || nm === '群聊';
+return false;
+}
 let panel = null;
 let elGrip = null, elHead = null, elBody = null, elMini = null; // 面板四块（收起态只留胶囊）
 let adjMini = false;   // true＝收起态小胶囊
@@ -6376,6 +6545,29 @@ const pg = panel.querySelector('[data-adj-page]');
 if (pg) pg.textContent = nm;
 const ctx = panel.querySelector('[data-adj-ctx]');
 if (ctx) ctx.textContent = '正在调：' + nm;
+syncPageSeg();
+}
+function syncPageSeg() {
+if (!panel) return;
+const nm = adjPageName();
+panel.querySelectorAll('[data-adj-goto]').forEach(function (b) {
+const on = (b.getAttribute('data-adj-goto') === 'chat') ? (nm === '聊天' || nm === '群聊') : (nm === '桌面');
+b.setAttribute('aria-pressed', on ? 'true' : 'false');
+b.style.background = on ? '#111' : 'var(--btn-cancel-bg,#fafafa)';
+b.style.color = on ? '#fff' : 'var(--ink,#111)';
+b.style.borderColor = on ? '#111' : 'var(--card-border,#ddd)';
+b.style.fontWeight = on ? '800' : '600';
+});
+panel.querySelectorAll('[data-adj-group]').forEach(function (h) {
+const mk = h.querySelector('[data-adj-group-mine]');
+if (mk) mk.style.display = groupIsCurrent(h.getAttribute('data-adj-group')) ? 'inline-block' : 'none';
+});
+const ch = panel.querySelector('[data-adj-ctxhint]');
+if (ch) {
+if (nm === '桌面') ch.textContent = '反色高亮的「桌面」＝你现在正在调的页面；点「聊天」就切到聊天页看现场（面板自动收成小胶囊）。';
+else if (nm === '聊天' || nm === '群聊') ch.textContent = '反色高亮的「聊天」＝你现在正在调的页面；点「桌面」就切到桌面页看现场（面板自动收成小胶囊）。';
+else ch.textContent = '当前不在桌面/聊天页（' + nm + '）：点「桌面」或「聊天」切过去看现场（面板自动收成小胶囊），调完点胶囊展开继续。';
+}
 }
 function setMini(on) {
 if (!panel) return;
@@ -6426,6 +6618,7 @@ if (!tapToOpen && e.target.closest('button')) return; // header 里的按钮不�
 if (e.pointerType === 'mouse' && e.button !== 0) return;
 drag = true; moved = false; sy = e.clientY;
 sb = parseFloat(panel.style.bottom) || bottomReserve();
+panel.style.transition = 'none'; // #1008：拖动期间关掉 bottom 过渡，保证跟手
 try { el.setPointerCapture(e.pointerId); } catch (er) {}
 e.preventDefault();
 });
@@ -6439,6 +6632,7 @@ applyAdjPos();
 const up = () => {
 if (!drag) return;
 drag = false;
+panel.style.transition = 'bottom .16s ease'; // #1008：松手恢复过渡（吸附/回自动位都是动画）
 if (tapToOpen && !moved) { setMini(false); return; } // 胶囊：点一下＝展开
 if (adjBottom != null && adjBottom <= bottomReserve() + 6) adjBottom = null; // 拖回自动位＝吸附复位
 applyAdjPos();
@@ -6467,20 +6661,31 @@ if (!silent) toast(ax.name + ' ' + (nv > 0 ? '+' : '') + nv + 'px');
 function buildPanel() {
 panel = document.createElement('div');
 panel.id = 'screen-adj-panel';
-panel.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:96;max-height:40vh;background:var(--card-bg,#fff);background:color-mix(in srgb, var(--card-bg,#fff) 72%, transparent);color:var(--ink,#111);box-shadow:0 -6px 24px rgba(0,0,0,.18);border-radius:16px 16px 0 0;overflow-y:auto;overflow-x:hidden;padding:0 14px calc(14px + var(--mochi-safe-bottom,env(safe-area-inset-bottom,0px)));box-sizing:border-box;display:flex;flex-direction:column;gap:6px';
+panel.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:96;max-height:40vh;background:var(--card-bg,#fff);background:color-mix(in srgb, var(--card-bg,#fff) 72%, transparent);color:var(--ink,#111);box-shadow:0 -6px 24px rgba(0,0,0,.18);border-radius:16px 16px 0 0;overflow-y:auto;overflow-x:hidden;padding:0 14px calc(14px + var(--mochi-safe-bottom,env(safe-area-inset-bottom,0px)));box-sizing:border-box;display:flex;flex-direction:column;gap:6px;transition:bottom .16s ease';
 const grip = document.createElement('div');
 grip.style.cssText = 'width:36px;height:4px;border-radius:2px;background:var(--card-border,#ddd);margin:7px auto 2px;flex:none';
 panel.appendChild(grip);
 bindAdjDrag(grip, false);
 elGrip = grip;
 const head = document.createElement('div');
-head.style.cssText = 'display:flex;align-items:center;gap:8px;flex:none;padding:2px 0 4px';
-head.innerHTML = '<b style="font-size:14px">屏幕适配微调</b><span style="font-size:11px;color:#888;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">拖标题行可上移 · 本机永久保存</span>';
+head.style.cssText = 'display:flex;flex-direction:column;gap:5px;flex:none;padding:2px 0 4px';
+const headTop = document.createElement('div');
+headTop.style.cssText = 'display:flex;align-items:center;gap:8px';
+headTop.innerHTML = '<b style="font-size:14px;flex:1;min-width:0">屏幕适配微调</b><span style="font-size:11px;color:#666;flex:none">本机永久保存</span>';
+head.appendChild(headTop);
+const headTool = document.createElement('div');
+headTool.style.cssText = 'display:flex;align-items:center;gap:8px';
+head.appendChild(headTool);
+const headHint = document.createElement('span');
+headHint.setAttribute('data-adj-draghint', '');
+headHint.style.cssText = 'font-size:11px;color:#666;flex:1;min-width:0;line-height:1.3';
+headHint.textContent = '按住这行标题上下拖＝把面板挪开';
+headTool.appendChild(headHint);
 const done = document.createElement('button');
 done.textContent = '完成';
 done.style.cssText = 'flex:none;border:none;background:#111;color:#fff;font-size:12px;font-weight:700;border-radius:99px;padding:6px 16px;cursor:pointer';
 done.addEventListener('click', closePanel);
-head.appendChild(done);
+headTop.appendChild(done);
 const holdBtn = document.createElement('button');
 holdBtn.textContent = '按住看默认';
 holdBtn.style.cssText = 'flex:none;border:1px solid var(--card-border,#ddd);background:var(--btn-cancel-bg,#fafafa);color:var(--ink,#111);font-size:12px;border-radius:99px;padding:6px 12px;cursor:pointer';
@@ -6500,7 +6705,7 @@ refreshVals();
 };
 holdBtn.addEventListener('pointerdown', holdOn);
 ['pointerup', 'pointerleave', 'pointercancel'].forEach(function (ev) { holdBtn.addEventListener(ev, holdOff); });
-head.insertBefore(holdBtn, done);
+headTool.insertBefore(holdBtn, headHint);
 const foldBtn = document.createElement('button');
 foldBtn.textContent = '收起';
 foldBtn.title = '收成一枚小胶囊（不挡底部导航/输入栏），切到桌面或聊天继续调';
@@ -6509,7 +6714,7 @@ const adjBody = document.createElement('div');
 adjBody.style.cssText = 'display:flex;flex-direction:column;gap:6px;flex:none';
 elBody = adjBody;
 foldBtn.addEventListener('click', () => { setMini(true); });
-head.insertBefore(foldBtn, holdBtn);
+headTool.insertBefore(foldBtn, holdBtn);
 panel.appendChild(head);
 elHead = head;
 bindAdjDrag(head, false); // grip 只有 4px 高，标题行才是主拖拽把手
@@ -6521,8 +6726,9 @@ bindAdjDrag(mini, true);
 panel.appendChild(mini);
 elMini = mini;
 const tip = document.createElement('div');
-tip.style.cssText = 'font-size:11px;color:#888;flex:none;line-height:1.5';
-tip.textContent = '拖动滑杆边看边调，双击滑杆回默认 0；「收起」变成小胶囊、不挡底部导航与输入栏，点「看桌面 / 看聊天」切到现场接着调；配合「屏幕适配诊断」——先诊断差多少 px，再来拖对应轴。';
+tip.setAttribute('data-adj-usage', '');
+tip.style.cssText = 'font-size:11px;color:#666;flex:none;line-height:1.5';
+tip.textContent = '想调哪一页，就点「正在调」旁边那一枚页签——切过去看现场（面板自动收成小胶囊）。下面滑杆按「哪一页生效」分三组，标着「你正在这一页」的那组才是当前页要调的；拖动当场生效、双击滑杆回默认 0。';
 adjBody.appendChild(tip);
 const ctx = document.createElement('div');
 ctx.style.cssText = 'flex:none;display:flex;align-items:center;gap:8px;border:1px solid var(--card-border,#eee);border-radius:10px;padding:7px 10px;font-size:12px';
@@ -6531,14 +6737,22 @@ ctxTxt.setAttribute('data-adj-ctx', '');
 ctxTxt.style.cssText = 'flex:1;min-width:0;font-weight:600';
 ctxTxt.textContent = '正在调：' + adjPageName();
 ctx.appendChild(ctxTxt);
-[['page-phone', '看桌面'], ['chat', '看聊天']].forEach(function (pair) {
+[['page-phone', '桌面'], ['chat', '聊天']].forEach(function (pair) {
 const pb = document.createElement('button');
+pb.setAttribute('data-adj-goto', pair[0]);
+pb.setAttribute('aria-pressed', 'false');
+pb.title = '切到「' + pair[1] + '」页看现场（面板自动收成小胶囊）';
 pb.textContent = pair[1];
-pb.style.cssText = 'flex:none;border:1px solid var(--card-border,#ddd);background:var(--btn-cancel-bg,#fafafa);color:var(--ink,#111);font-size:12px;font-weight:600;border-radius:99px;padding:5px 12px;cursor:pointer';
+pb.style.cssText = 'flex:none;border:1px solid var(--card-border,#ddd);background:var(--btn-cancel-bg,#fafafa);color:var(--ink,#111);font-size:12px;font-weight:600;border-radius:99px;padding:5px 14px;cursor:pointer';
 pb.addEventListener('click', function () { goPage(pair[0]); });
 ctx.appendChild(pb);
 });
 adjBody.appendChild(ctx);
+const ctxHint = document.createElement('div');
+ctxHint.setAttribute('data-adj-ctxhint', '');
+ctxHint.style.cssText = 'font-size:11px;color:#666;flex:none;line-height:1.4;margin-top:-2px';
+ctxHint.textContent = '点「桌面」或「聊天」切过去看现场（面板自动收成小胶囊），调完点胶囊展开继续。'; // syncPageSeg 随后按当前页改写
+adjBody.appendChild(ctxHint);
 try {
 const sug = (window.mochiScreenFixSuggest ? window.mochiScreenFixSuggest() : []) || [];
 if (sug.length) {
@@ -6563,7 +6777,21 @@ adjBody.appendChild(srow);
 }
 } catch (eSug) {}
 const cur0 = window.mochiScreenAdj ? window.mochiScreenAdj.all() : {};
+let lastGroup = '';
 AXES.forEach(ax => {
+if (ax.group !== lastGroup) {
+lastGroup = ax.group;
+const gh = document.createElement('div');
+gh.setAttribute('data-adj-group', ax.group);
+gh.style.cssText = 'flex:none;display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px;font-weight:800;color:#444;padding-top:7px';
+gh.textContent = AXIS_GROUPS[ax.group] || '';
+const mine = document.createElement('span');
+mine.setAttribute('data-adj-group-mine', '');
+mine.style.cssText = 'display:none;background:#111;color:#fff;font-size:10px;font-weight:700;border-radius:99px;padding:1px 7px';
+mine.textContent = '你正在这一页';
+gh.appendChild(mine);
+adjBody.appendChild(gh);
+}
 const row = document.createElement('div');
 row.style.cssText = 'flex:none;border-top:1px solid var(--card-border,#eee);padding:7px 0';
 const line = document.createElement('div');
@@ -6691,12 +6919,8 @@ syncMiniLabel();
 window.mochiOpenScreenAdj = openAdjPanel;
 const entry = document.getElementById('row-screen-adj');
 if (entry) entry.addEventListener('click', openAdjPanel);
-const chatEntry = document.getElementById('more-screen-adj');
-if (chatEntry) chatEntry.addEventListener('click', () => {
-const mp = document.getElementById('chat-more-panel');
-if (mp) mp.hidden = true; // 与其它 more-item 同口径：点了先把更多面板收掉
-openAdjPanel();
-});
+const chatSetEntry = document.getElementById('cs-screen-adj');
+if (chatSetEntry) chatSetEntry.addEventListener('click', openAdjPanel);
 const decorEntry = document.getElementById('decor-fit');
 if (decorEntry) decorEntry.addEventListener('click', () => {
 try { if (window.exitDecor) window.exitDecor(); } catch (e) {} // 先退出装修模式再开面板，避免两层叠着看不清
@@ -7475,7 +7699,7 @@ open('隐私与数据安全',
 });
 bind('row-contact', () => {
 open('联系作者 / 反馈',
-'作者只有两个账号：小红书 @言序（1842523578）、抖音 @言序（58334080131）。\n\n作者不玩抖音、不回消息，账号仅用于发布本站链接。本站完全免费，任何收费均为诈骗。\n\n作者已决定月底停更：互助群月底解散，之后不再答疑、不再帮看 bug；网站仍开源免费，代码可自行下载修改。\n\n遇到问题建议先看「使用说明」，并用 工具 → 设备兼容诊断 一键复制本机环境信息再反馈。');
+'作者只有两个账号：小红书 @言序（1842523578）、抖音 @言序（58334080131）。\n\n作者不玩抖音、不回消息，账号仅用于发布本站链接。本站完全免费，任何收费均为诈骗。\n\n作者已决定月底停更：互助群月底解散，之后不再答疑、不再帮看 bug；网站仍开源免费，代码可自行下载修改。\n\n遇到问题建议先看「使用说明」，并用 信息诊断 →「设备兼容诊断」一键复制本机环境信息再反馈。');
 });
 bind('row-faq-app', () => {
 open('关于“会不会做成 App”',
@@ -7497,6 +7721,18 @@ bind('row-faq-preset', () => {
 open('系统预设字卡与功能设置',
 '建议打开使用。（我自己用是默认全开）\n\n初衷就是为了不限制梦角表达，如果关掉，反而限制了它，和基础传讯网站没什么差别——正是因为以前接触的字卡传讯类型太简单才做的。\n\n建议先全部打开使用，再根据个人适应情况调整。');
 });
+bind('row-faq-noacct', () => {
+open('关于「没有账号、不会自动同步」',
+'本站没有账号系统（不用注册、不用登录），也没有云端——你的数据只存在【这台手机 + 这个浏览器】的本地存储里。两个直接后果：\n① 两台手机（或两个浏览器）之间不会自动同步，A 上的聊天记录不会出现在 B 上；\n② 换机 / 换浏览器时数据不会自己跟过去，必须靠「导出数据」→ 在新设备「导入数据」搬运一次。\n\n想换设备：先在旧设备 设置 → 通用 →「导出数据」导出完整备份，再在新设备 设置 → 通用 →「导入数据」导入。\n\n同一台手机上，浏览器直接打开 和「添加到桌面」后的图标也各自独立（见「浏览器和桌面图标是两份数据」）。');
+});
+bind('row-faq-twostore', () => {
+open('浏览器和桌面图标是两份数据',
+'「浏览器直接打开本站」和「添加到主屏幕 / 桌面后从图标打开」是两份彼此独立的存储：在一个入口存的数据，另一个入口看不到——这不是数据丢了。\n\n常见表现：装到桌面后打开发现是空的 / 两个入口聊天记录对不上。\n\n原因：iPhone 的主屏幕应用与 Safari、部分安卓浏览器（如 Edge）与它的桌面应用，各用各自的存储空间，互不相通。\n\n怎么处理：\n① 固定用一个入口，不要换来换去；\n② 想换入口：先在旧入口 设置 → 通用 →「导出数据」导出，再到新入口 设置 → 通用 →「导入数据」导入；\n③ iPhone 推荐「添加到主屏幕」后用桌面图标（不受 Safari 7 天清空规则限制，见关于段顶部提示）。');
+});
+bind('row-faq-notify', () => {
+open('锁屏 / 后台收不到消息、通知不弹？',
+'本站是网页、不是原生 App，消息与通知受浏览器 / 系统限制，不是网站坏了。按下面查：\n\n① 页面完全关掉后，普通网页无法自己醒来——需要到 设置 → 系统 打开「后台保活」并开启「离线消息提醒」；仅部分安卓浏览器（Chromium 系，如 Chrome / Edge）支持「离线消息提醒」，且要允许「通知」权限。\n② iPhone：Safari / 网页拿不到系统通知，关掉页面后不会再弹——可改用应用内的「桌面消息弹窗」横幅（需页面开着）。\n③ 省电 / 电池优化 / 后台限制会冻结网页导致不弹：把浏览器加入电池优化白名单、允许后台运行。\n④ 通知权限被拒：到系统设置里给浏览器打开「通知」权限。\n\n结论：想尽量稳定收到——安卓用 Chrome / Edge 并打开「后台保活」＋「后台弹窗」；iPhone 别指望关掉页面还能收通知（系统限制）。完整排查步骤见 设置 → 系统 →「后台弹窗」行的「功能说明」，或点该行右侧「测试」一键体检。');
+});
 bind('row-faq-st-lose', () => {
 open('数据为什么会自己没（先看这条）',
 '先把最重要的话说在前面：本站没有服务器、没有云端账号，你的全部数据（聊天记录、字卡、头像、壁纸、音乐、设置）只保存在【这台手机 + 这个浏览器】的本地存储里。所以浏览器或系统清理数据时，本站会跟着一起被清——这是所有网页共同的设备限制，不是本站坏了，也不是有人删了你的数据。\n\n常见的会清掉数据的操作（都属正常机制）：\n① 手动「清除浏览器数据 / 清理缓存」：勾选了「网站数据 / Cookie」就会把本站一起删掉；\n② 手机管家 / 安全中心的「一键清理」「清理加速」「释放空间」：很多手机会把浏览器存的网站数据当垃圾扫掉；\n③ 浏览器自己的自动清理：设了「退出时清除浏览数据」或「定期自动移除网站数据」（iPhone Safari 有类似选项）；存储空间紧张时，浏览器也会优先清掉不常用网站的数据；\n④ iPhone 的 Safari：网站数据可能被系统回收清空；长时间（约 7 天以上）完全不打开，系统也有权自动清——所以 iPhone 要定期打开用一用 + 定期备份；\n⑤ 卸载 / 重装浏览器、手机恢复出厂或系统大更新、换机换浏览器——本地数据跟着没。\n\n没做上面任何操作却突然丢、还高频反复丢，才需要怀疑是 bug（见「丢数据了，怎么判断是不是 bug」）。防丢的唯一办法＝定期导出备份（见「怎么备份与恢复」）。');
@@ -7515,7 +7751,7 @@ open('怎么备份与恢复（唯一防线）',
 });
 bind('row-faq-st-bug', () => {
 open('丢数据了，怎么判断是不是 bug',
-'先自查再报修——数据丢失最常见的原因不是 bug，是设备限制（详见「数据为什么会自己没」）。按顺序自查：\n\n① 想一想最近有没有：清过浏览器数据 / 缓存、用过手机管家一键清理、开过无痕模式、卸载重装过浏览器、恢复出厂 / 系统大更新、换过手机或浏览器、把手机给别人动过；\n② 打开其它常用网站，看登录状态还在不在：其它网站也被退出 / 被清了＝浏览器数据被清过，不是本站 bug；\n③ 看丢的范围：全部没了多半是浏览器层被清；只有个别消息或个别功能不对，才更像程序问题；\n④ 换过入口吗：浏览器打开和桌面快捷方式数据不互通，另一个入口里可能还在。\n\n都排除了、且是高频反复丢，才按疑似 bug 处理。报修格式：【手机型号 + 浏览器 + 具体现象】，外加 设置 → 工具 →「设备兼容诊断」复制的信息，并说明丢了什么、什么时候发现、之前做过上面哪些操作。');
+'先自查再报修——数据丢失最常见的原因不是 bug，是设备限制（详见「数据为什么会自己没」）。按顺序自查：\n\n① 想一想最近有没有：清过浏览器数据 / 缓存、用过手机管家一键清理、开过无痕模式、卸载重装过浏览器、恢复出厂 / 系统大更新、换过手机或浏览器、把手机给别人动过；\n② 打开其它常用网站，看登录状态还在不在：其它网站也被退出 / 被清了＝浏览器数据被清过，不是本站 bug；\n③ 看丢的范围：全部没了多半是浏览器层被清；只有个别消息或个别功能不对，才更像程序问题；\n④ 换过入口吗：浏览器打开和桌面快捷方式数据不互通，另一个入口里可能还在。\n\n都排除了、且是高频反复丢，才按疑似 bug 处理。报修格式：【手机型号 + 浏览器 + 具体现象】，外加 设置 → 信息诊断 →「设备兼容诊断」复制的信息，并说明丢了什么、什么时候发现、之前做过上面哪些操作。');
 });
 })();
 (function () {

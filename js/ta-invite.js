@@ -124,6 +124,12 @@ const d = tiLoad();
 return drawFrom(enabledPool(d, ['rps', 'pong', 'snake', 'cuddle']));
 } catch (e) { return null; }
 };
+window.taInvitePickKind = function (kind) {
+try {
+const d = tiLoad();
+return drawFrom(enabledPool(d, [kind]));
+} catch (e) { return null; }
+};
 window.__tiBankInfo = function () {
 try {
 const d = tiLoad();

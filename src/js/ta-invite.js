@@ -4,8 +4,9 @@
 // 支持自定义新增、分组管理、批量导入、跨分类搜索、字卡库双入口、IndexedDB 权威恢复。
 // 触发链路不变：tryAutoSend → tryActiveInvite（chat.js）按 联系人回复设置→其他 的
 // ai-rps-en/prob、ai-game-en/prob 判定后从本库抽一张；本文件只负责题库存储与抽取。
-// 手动触发入口：聊天「更多功能 → TA的提问 → 邀请」（triggerTaInviteNow 定义在 chat.js，
-// 因为发送/弹确认/开半框依赖聊天页内部函数）；本库提供 taInvitePickAny 供其抽卡。
+// 手动触发入口：聊天「更多功能 → TA的提问 → 邀请 / 贴贴」（triggerTaInviteNow / triggerTaCuddleNow
+// 定义在 chat.js，因为发送/弹确认/开半框依赖聊天页内部函数）；本库提供 taInvitePickAny（全类型）
+// 与 taInvitePickKind（按类型，v8.29 #1003 起供「贴贴」那枚用）供其抽卡。
 (function () {
   const store = window.activeStore();
   const KEY = 'ta-invite';
@@ -150,6 +151,15 @@
     try {
       const d = tiLoad();
       return drawFrom(enabledPool(d, ['rps', 'pong', 'snake', 'cuddle']));
+    } catch (e) { return null; }
+  };
+  // v8.29 #1003：手动触发按类型抽取（更多功能→TA的提问→贴贴）——只在指定类型的启用池里抽。
+  // 「邀请」那枚走上面的 taInvitePickAny（全类型随机），贴贴那枚要的是「一定是贴贴」，
+  // 故单开一个按 kind 抽的出口；口径与 taInvitePickAny 相同（不看开关/概率，抽不到返回 null）。
+  window.taInvitePickKind = function (kind) {
+    try {
+      const d = tiLoad();
+      return drawFrom(enabledPool(d, [kind]));
     } catch (e) { return null; }
   };
   window.__tiBankInfo = function () {

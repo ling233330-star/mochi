@@ -830,8 +830,6 @@
       //   ③ 音频被外部打断暂停→排一次退避补播（间隔由 kaSchedule 按连击指数化）。
       // 补播节奏明显放缓后，与其他 App 抢音频焦点的拉锯大幅减轻。
       keepInterval = setInterval(function () {
-        // #960 续：细分相位——ka-tick 是总拍，下面两处各自打点，便于把「冻结前后发生的事」
-        // 与「只是最频繁、恰好记在最后」区分开（取证行会带距冻结起点的中位差）
         try { if (window.__mochiPhase) window.__mochiPhase('ka-tick'); } catch (e0) {}
         if (keepAudio && keepAudio.el) {
           try {
@@ -856,14 +854,7 @@
                 }
               } catch (e) { hold = true; }
               if (hold) {
-                try {
-                  // #960 续：只在状态真要变时才写——原实现每 5 秒无条件重写同一值，iOS 上是
-                  // 一条到媒体/Now Playing 的跨进程 IPC，属纯重复劳动（读不到值时行为与旧版一致）
-                  if (navigator.mediaSession && navigator.mediaSession.playbackState !== 'playing') {
-                    try { if (window.__mochiPhase) window.__mochiPhase('ka-ms'); } catch (e0) {}
-                    navigator.mediaSession.playbackState = 'playing';
-                  }
-                } catch (e) {}
+                try { if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing'; } catch (e) {}
               }
               // 稳定播放够久 → 复位退避连击（下次打断从头 5s 起退避）
               if (kaPauseStreak && Date.now() - kaLastPlayAt > kaStableMs()) kaPauseStreak = 0;

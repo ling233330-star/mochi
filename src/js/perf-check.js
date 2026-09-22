@@ -295,16 +295,11 @@
                 // #907 冻结归因：回查冻结起点（wall 时钟≈现在−d）之前最近一条相位标记——
                 // 「冻结前最后在做什么」直接点名（大键写 IDB／小键写日志／聊天落盘／表情包落盘…）
                 try {
-                  var _pl = window.__mochiPhaseLog || [], _hit = '(无标记)', _dl = -1;
+                  var _pl = window.__mochiPhaseLog || [], _hit = '(无标记)';
                   var _startWall = Date.now() - Math.round(d);
-                  for (var _pi = _pl.length - 1; _pi >= 0; _pi--) {
-                    if (_pl[_pi].t <= _startWall) { _hit = _pl[_pi].tag; _dl = _startWall - _pl[_pi].t; break; }
-                  }
+                  for (var _pi = _pl.length - 1; _pi >= 0; _pi--) { if (_pl[_pi].t <= _startWall) { _hit = _pl[_pi].tag; break; } }
                   if (!rep.fzBy) rep.fzBy = {};
                   rep.fzBy[_hit] = (rep.fzBy[_hit] || 0) + 1;
-                  // #960 续：记「标记距冻结起点的时间差」——高频标记（如保活 5s 拍）天然最常出现在
-                  // 冻结前；只有差值接近 0（冻结紧跟该标记后）才是因果证据，差几秒只是恰好排在前面。
-                  if (_dl >= 0) { if (!rep.fzD) rep.fzD = {}; (rep.fzD[_hit] = rep.fzD[_hit] || []).push(_dl); if (rep.fzD[_hit].length > 60) rep.fzD[_hit].shift(); }
                 } catch (e7) {}
               }
               rep.janky++;
@@ -383,16 +378,7 @@
       if (r.fzBy) {
         var _fk = Object.keys(r.fzBy).sort(function (a, b) { return r.fzBy[b] - r.fzBy[a]; }).slice(0, 4);
         if (_fk.length && r.fzBy[_fk[0]] > 0) {
-          L.push('· 冻结前序操作（取证）：' + _fk.map(function (k) {
-            var ds = (r.fzD && r.fzD[k]) || [];
-            var med = '';
-            if (ds.length) {
-              var sd = ds.slice().sort(function (a, b) { return a - b; });
-              med = '（距冻结起点中位 ' + sd[Math.floor(sd.length / 2)] + 'ms' + (sd[Math.floor(sd.length / 2)] <= 150 ? '·紧邻＝高危' : '·较远＝仅是最后一条标记') + '）';
-            }
-            return k + ' ×' + r.fzBy[k] + med;
-          }).join('、'));
-          L.push('  （判读：中位差值 ≤150ms 才说明冻结紧跟该操作＝真凶；差几秒的只是高频标记恰好排在最后）');
+          L.push('· 冻结前序操作（取证）：' + _fk.map(function (k) { return k + ' ×' + r.fzBy[k]; }).join('、'));
         }
       }
       if (concOk(r)) {

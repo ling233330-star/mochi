@@ -2338,7 +2338,7 @@ liveBtn.id = 'gc-live-adjust';
 liveBtn.style.cssText = 'display:flex;align-items:center;gap:10px;width:calc(100% - 24px);margin:10px 12px 0;padding:11px 14px;border:1px solid var(--btn-bg,#111);border-radius:12px;background:color-mix(in srgb, var(--btn-bg,#111) 10%, transparent);color:var(--ink,#111);text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;flex-shrink:0';
 liveBtn.innerHTML = '<span style="flex:1;min-width:0">' +
 '<span style="display:block;font-size:15px;font-weight:700;line-height:1.25">边看边调</span>' +
-'<span style="display:block;font-size:11.5px;font-weight:400;opacity:.85;margin-top:2px">打开调色条：群聊在上、控件在下，改哪看哪、即时生效</span>' +
+'<span style="display:block;font-size:11.5px;font-weight:400;opacity:.85;margin-top:2px">打开调色条：群聊在上、控件在下，改哪看哪、即时生效；标题行可按住往上拖让位</span>' +
 '</span><span style="flex:none;font-size:12px;font-weight:700;padding:7px 10px;border:1px solid var(--btn-bg,#111);border-radius:999px;background:var(--btn-bg,#111);color:var(--btn-ink,#fff);white-space:nowrap">点击开启 ›</span>';
 liveBtn.addEventListener('click', openGcBeautyDrawer);
 rootEl.insertBefore(liveBtn, rootEl.firstChild);
@@ -2584,10 +2584,16 @@ if (!t || !t.closest) return;
 if (t.closest('.tab') || t.closest('#gc-back') || t.closest('.app[data-app]')) hideGcBeautyDrawer();
 }, true);
 let gcDrawerSec = 'bubble';
+let gcDockBot = null;
+function gcDrawerApplyBottom() {
+const d = document.getElementById('gc-beauty-drawer');
+if (!d) return;
+d.style.bottom = (gcDockBot || 0) + 'px';
+}
 function openGcBeautyDrawer() {
 try { if (settingsPanel) settingsPanel.hidden = true; } catch (e) {}
 const d = gcDrawerEl();
-d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:95;max-height:40vh;background:var(--card-bg,#fff);background:color-mix(in srgb, var(--card-bg,#fff) 72%, transparent);color:var(--ink,#111);box-shadow:0 -6px 24px rgba(0,0,0,.18);border-radius:16px 16px 0 0;overflow-y:auto;overflow-x:hidden;padding:0 12px calc(10px + var(--mochi-safe-bottom,env(safe-area-inset-bottom,0px)));box-sizing:border-box;display:flex;flex-direction:column;gap:8px';
+d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:95;max-height:40vh;transition:bottom .16s ease;background:var(--card-bg,#fff);background:color-mix(in srgb, var(--card-bg,#fff) 72%, transparent);color:var(--ink,#111);box-shadow:0 -6px 24px rgba(0,0,0,.18);border-radius:16px 16px 0 0;overflow-y:auto;overflow-x:hidden;padding:0 12px calc(10px + var(--mochi-safe-bottom,env(safe-area-inset-bottom,0px)));box-sizing:border-box;display:flex;flex-direction:column;gap:8px';
 d.innerHTML = '';
 const grip = document.createElement('div');
 grip.style.cssText = 'width:36px;height:4px;border-radius:2px;background:var(--card-border,#ddd);margin:7px auto 0;flex:none';
@@ -2600,11 +2606,43 @@ b.style.cssText = 'flex:none;border:1px solid var(--card-border,#ddd);background
 b.addEventListener('click', fn);
 return b;
 };
+const bindGcDockDrag = (el) => {
+el.style.touchAction = 'none';
+el.style.cursor = 'grab';
+let sy = 0, sb = 0, drag = false;
+el.addEventListener('pointerdown', (e) => {
+if (e.target.closest('button')) return;
+if (e.pointerType === 'mouse' && e.button !== 0) return;
+drag = true; sy = e.clientY; sb = gcDockBot || 0;
+d.style.transition = 'none'; // 拖动期间关掉 bottom 过渡，保证跟手
+try { el.setPointerCapture(e.pointerId); } catch (er) {}
+e.preventDefault();
+});
+el.addEventListener('pointermove', (e) => {
+if (!drag) return;
+gcDockBot = Math.max(0, Math.min(Math.round(window.innerHeight * 0.6), Math.round(sb + sy - e.clientY)));
+gcDrawerApplyBottom();
+e.preventDefault();
+});
+const up = () => {
+if (!drag) return;
+drag = false;
+d.style.transition = 'bottom .16s ease';
+if ((gcDockBot || 0) < 24) gcDockBot = null; // 接近底部＝吸附回贴底
+gcDrawerApplyBottom();
+};
+el.addEventListener('pointerup', up);
+el.addEventListener('pointercancel', up);
+};
+bindGcDockDrag(grip);
 const hd = document.createElement('div');
 hd.style.cssText = 'display:flex;align-items:center;gap:8px;flex:none';
 const hdTxt = document.createElement('span');
 hdTxt.textContent = '边看边调（即时生效）';
-hdTxt.style.cssText = 'font-size:13px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+hdTxt.style.cssText = 'font-size:13px;font-weight:700;flex:none';
+const hdHint = document.createElement('span');
+hdHint.textContent = '按住标题行上下拖 · 让开看群聊';
+hdHint.style.cssText = 'font-size:11px;color:var(--muted,#888);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
 const panelBody = document.createElement('div');
 panelBody.style.cssText = 'display:flex;flex-direction:column;gap:8px;flex:none';
 const body = document.createElement('div');
@@ -2618,8 +2656,9 @@ const closeBtn = mkMini('\u2715', () => {
 hideGcBeautyDrawer();
 try { gcSetTab = 'beauty'; renderSettingsPanel(); if (settingsPanel) settingsPanel.hidden = false; } catch (e) {}
 }, ';padding:4px 8px');
-hd.appendChild(hdTxt); hd.appendChild(foldBtn); hd.appendChild(closeBtn);
+hd.appendChild(hdTxt); hd.appendChild(hdHint); hd.appendChild(foldBtn); hd.appendChild(closeBtn);
 d.appendChild(hd);
+bindGcDockDrag(hd); // grip 只有 4px 高，标题行才是主拖拽把手
 const chipsRow = document.createElement('div');
 chipsRow.style.cssText = 'display:flex;gap:6px;flex:none';
 panelBody.appendChild(chipsRow);
@@ -2854,14 +2893,20 @@ wrap.appendChild(mkNote('想逐项精调（含美化方案保存/导出等）回
 return wrap;
 } }
 ];
-const renderSec = (key) => {
-gcDrawerSec = key;
+const paintGcChips = (key) => {
 Array.prototype.forEach.call(chipsRow.children, c => {
 const on = c.dataset.sec === key;
-c.style.background = on ? 'var(--ink,#111)' : 'var(--btn-cancel-bg,#fafafa)';
-c.style.color = on ? 'var(--bg-b,#fff)' : 'var(--ink,#111)';
-c.style.borderColor = on ? 'var(--ink,#111)' : 'var(--card-border,#ddd)';
+const bg = on ? 'var(--ink,#111)' : 'var(--btn-cancel-bg,#fafafa)';
+if (c.style.background !== bg) c.style.background = bg;
+const fg = on ? 'var(--bg-b,#fff)' : 'var(--ink,#111)';
+if (c.style.color !== fg) c.style.color = fg;
+const bd = on ? 'var(--ink,#111)' : 'var(--card-border,#ddd)';
+if (c.style.borderColor !== bd) c.style.borderColor = bd;
 });
+};
+const renderSec = (key) => {
+gcDrawerSec = key;
+paintGcChips(key);
 body.innerHTML = '';
 paletteHost = null;
 colorItems = [];
@@ -2876,6 +2921,7 @@ c.addEventListener('click', () => renderSec(s.key));
 chipsRow.appendChild(c);
 });
 renderSec(gcDrawerSec);
+gcDrawerApplyBottom();
 d.style.display = 'flex';
 }
 const GC_SCHEMES_KEY = 'gc-beauty-schemes';
@@ -3453,12 +3499,15 @@ reader.readAsDataURL(f);
 document.body.appendChild(fi);
 gcImgInput = fi;
 if (window.mochiFilePickLabel && gcImgBtn) window.mochiFilePickLabel(gcImgBtn, fi);
+if (window.mochiFilePickSurface && gcImgBtn) window.mochiFilePickSurface(gcImgBtn, { id: 'gc-img-tap', accept: 'image/*', multiple: true, owner: fi });
 return fi;
 }
+try { if (window.mochiFilePickSurface && gcImgBtn) window.mochiFilePickSurface(gcImgBtn, { id: 'gc-img-tap', accept: 'image/*', multiple: true, owner: gcImgPicker() }); } catch (err) {}
 if (gcImgBtn) gcImgBtn.addEventListener('click', (e) => {
 e.stopPropagation();
 const fi = gcImgPicker();
 try { if (window.mochiFilePickLabel) window.mochiFilePickLabel(gcImgBtn, fi); } catch (err) {}
+try { if (window.mochiFilePickSurface) window.mochiFilePickSurface(gcImgBtn, { id: 'gc-img-tap', accept: 'image/*', multiple: true, owner: fi }); } catch (err) {}
 var _fb = () => { window.mochiFilePickFire(fi, { onFail: () => toast('无法打开图片选择器，请重试') }); };
 if (window.mochiFilePickGuard) window.mochiFilePickGuard(fi, _fb);
 else _fb();

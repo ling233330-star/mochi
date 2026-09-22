@@ -189,8 +189,8 @@ if (avPaneC) avPaneC.hidden = !(nameKind && !me);
 if (avPaneD) avPaneD.hidden = !(nameKind && me);
 syncVal();
 }
-function switchAvTab(me) { avOwner = me ? 1 : 0; syncAvPane(); }
-function switchAvKind(name) { avKind = name ? 'name' : 'avatar'; syncAvPane(); }
+function switchAvTab(me) { avOwner = me ? 1 : 0; syncAvPane(); try { avKickFirstScreen(avGrid); avKickFirstScreen(avMeGrid); } catch (e) {} }
+function switchAvKind(name) { avKind = name ? 'name' : 'avatar'; syncAvPane(); try { avKickFirstScreen(avGrid); avKickFirstScreen(avMeGrid); } catch (e) {} }
 const avImgObserver = ('IntersectionObserver' in window)
 ? new IntersectionObserver((entries) => {
 for (const en of entries) {
@@ -408,6 +408,55 @@ const myToken = ++avShowToken;
 avShowWhenDecoded(function () { avPage.hidden = false; }, myToken);
 }
 let avShowToken = 0; // #692：头像互动半框「解码后再显示」世代令牌（关闭/重开作废，防空回调弹出）
+const AV_DECODE_AWAIT_MAX = 24; // #716 首屏口径（#1011 起提到模块作用域：首屏判定函数也要用）
+function avFirstScreen(grid) {
+const out = [];
+if (!grid) return out;
+let imgs; try { imgs = grid.querySelectorAll('img'); } catch (e) { return out; }
+if (!imgs || !imgs.length) return out;
+let cr = null; try { cr = (avPage || grid).getBoundingClientRect(); } catch (e) {}
+const byRect = !!(cr && cr.height > 4); // 没量到几何（非活动 pane 等）时退回前 N 张旧口径
+for (let i = 0; i < imgs.length; i++) {
+if (out.length >= AV_DECODE_AWAIT_MAX) break;
+const im = imgs[i];
+if (byRect) {
+let r = null; try { r = im.getBoundingClientRect(); } catch (e) {}
+if (r && r.top > cr.bottom + 80) break; // 半框下沿外的留给懒加载
+if (!r || r.bottom < cr.top - 80) continue; // 已滚上去/非活动 pane（无几何）不占等待名额
+out.push(im);
+} else out.push(im);
+}
+return out;
+}
+function avKickFirstScreen(grid) {
+const imgs = avFirstScreen(grid);
+for (let i = 0; i < imgs.length; i++) {
+const im = imgs[i];
+let ds = ''; try { ds = (im.dataset && im.dataset.src) || ''; } catch (e) {}
+if (ds && !im.getAttribute('src')) {
+im.setAttribute('src', ds); // 当场补：不等 IO 回调（令牌载荷同路径，池会按 src 重写真载荷）
+try { im.removeAttribute('data-src'); } catch (e) {}
+try { if (avImgObserver) avImgObserver.unobserve(im); } catch (e) {}
+}
+}
+return imgs;
+}
+function avImgReady(im) {
+return new Promise(function (res) {
+let done = false;
+const okNow = function () { try { return !!(im.complete && im.naturalWidth > 0); } catch (e) { return false; } };
+const srcNow = function () { try { return im.getAttribute('src') || ''; } catch (e) { return ''; } };
+const off = function () { try { im.removeEventListener('load', settle); im.removeEventListener('error', settle); } catch (e) {} };
+const settle = function () {
+if (done) return;
+if (okNow()) { done = true; off(); res(true); return; }
+if (srcNow().indexOf('@@m:') !== 0) { done = true; off(); res(false); return; } // 真失败/无源：不挡显示
+};
+try { im.addEventListener('load', settle); im.addEventListener('error', settle); } catch (e) {}
+settle();
+setTimeout(function () { if (!done) { done = true; off(); res(okNow()); } }, 2400);
+}).then(function () { try { return im.decode ? im.decode().catch(function () {}) : null; } catch (e) { return null; } });
+}
 function avShowWhenDecoded(show, token) {
 let shown = false;
 const fin = function () {
@@ -416,22 +465,17 @@ if (token !== undefined && token !== avShowToken) return; // #692 已关闭/已�
 try { show(); } catch (e) {}
 };
 if (!window.Promise) { fin(); return; }
-const AV_DECODE_AWAIT_MAX = 24;
 const grids = [avGrid, avMeGrid];
 const jobs = [];
-let awaited = 0;
 for (let g = 0; g < grids.length; g++) {
 const grid = grids[g];
 if (!grid) continue;
+const first = avKickFirstScreen(grid); // #1011：先把首屏载荷补进 src（不等 IO 回调）
+for (let i = 0; i < first.length; i++) jobs.push(avImgReady(first[i]));
 const imgs = grid.querySelectorAll('img[src]');
 for (let i = 0; i < imgs.length; i++) {
-const im = imgs[i];
-if (awaited < AV_DECODE_AWAIT_MAX) {
-awaited++;
-try { if (im.decode) jobs.push(im.decode().catch(function () {})); } catch (e) {}
-} else {
-try { if (im.decode) im.decode().catch(function () {}); } catch (e) {} // #716：首屏外只预热不等待
-}
+if (first.indexOf(imgs[i]) >= 0) continue;
+try { if (imgs[i].decode) imgs[i].decode().catch(function () {}); } catch (e) {} // #716：首屏外只预热不等待
 }
 }
 if (!jobs.length) { fin(); return; }
@@ -563,6 +607,9 @@ toast('添加失败，请选择有效的图片文件');
 }
 };
 if (window.mochiFilePickLabel) window.mochiFilePickLabel(btn, input);
+if (window.mochiFilePickSurface) {
+window.mochiFilePickSurface(btn, { id: input.id + '-tap', accept: 'image/*', multiple: true, owner: input });
+}
 btn.addEventListener('click', (e) => {
 var _fb = () => { window.mochiFilePickFire(input, { onFail: () => toast('无法打开相册，请重试') }); };
 if (window.mochiFilePickGuard) window.mochiFilePickGuard(input, _fb);

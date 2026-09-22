@@ -165,6 +165,22 @@
 .gs-row .tag:hover, .gs-row .tag:focus-visible { background:rgba(0,0,0,.06); border-color:rgba(0,0,0,.12); outline:none; }
 [data-theme="dark"] .gs-row .tag { color:#aaa; border-color:rgba(255,255,255,.14); background:rgba(255,255,255,.06); }
 [data-theme="dark"] .gs-row .tag:hover, [data-theme="dark"] .gs-row .tag:focus-visible { background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.2); }
+/* v8.29 #978：设置页「本机能不能用」的变灰与替代指引。原 #964 的静态平台胶囊（「仅安卓」/
+   「仅 iPhone」）已撤除——那三条胶囊的真实前提都不是手机系统（后台通知＝Chromium 内核 +
+   https + 通知权限；离线消息提醒＝Chromium + 添加到主屏幕；顶部避让修正＝添加到主屏幕的独立
+   应用形态），静态标平台两个方向都会误导：桌面 Chromium 用户被「仅安卓」劝退（其实能用），
+   iPhone 浏览器形态的用户被「仅 iPhone」叫去开一个空开关。现在只保留「本机不满足条件 →
+   变灰 + 给替代入口」，判定在 personalize.js 的 initUseMark。.plat-off 只变灰、绝不 disabled
+   开关——device.js 的平台 / 形态判定都有失手面（OPPO/Via 伪装 iPhone、桌面版网站模式），
+   识别失手的用户必须仍能点到这个开关。 */
+.set-row.plat-off .txt, .gs-row.plat-off > span { opacity:.6; }
+.plat-hint .plat-go {
+  display:inline-block; margin-left:6px; padding:2px 9px; border-radius:9px; font-weight:700;
+  cursor:pointer; color:#2f6fd0; background:rgba(47,111,208,.12);
+}
+[data-theme="dark"] .plat-hint .plat-go { color:#8ab4f8; background:rgba(138,180,248,.16); }
+@keyframes platFlash { 0% { background:rgba(47,111,208,.18); } 100% { background:rgba(47,111,208,0); } }
+.set-row.plat-flash, .gs-row.plat-flash { animation:platFlash 1.5s ease-out 1; }
 /* #848 设置行右侧「档位胶囊」——非布尔的多档选择（如红包捎话内容三档），点一下弹 pills */
 .gs-pick {
   flex-shrink:0; font-size:12px; font-weight:600; color:var(--ink); line-height:1.4; white-space:nowrap;

@@ -22,6 +22,22 @@ let chatKnownEmpty = false;
 let lastIdbLoadPrefix = null;
 let lastIdbLoadAt = 0;
 const IDB_RELOAD_MIN_GAP = 8000;
+// FIX 2026-09-21 #967 权威未达标记：本桌「已起读、权威还没到手」期间恒真。与 chatDbReady
+// 分工不同——chatDbReady 只管「读库链已收口、可以放开写盘」，armReadyFuse 的 15s 保险丝也会
+// 把它置真（那只是解写盘死锁，不代表数据到了）。进度条必须认「数据到没到」而不是「保险丝跳
+// 没跳」：旧实现两者混用一个标志，保险丝一跳进度条就收，屏上却一条消息都没有 ⇒「聊天里
+// 什么也看不到」且再没有任何读库入口（无头实证：读全失败进聊天，第 15s 进度条收起、第 35s
+// 6 次快重试耗尽、90s 仍空屏零提示；模拟回前台事件也不恢复，只有再点一次进聊天才回来）。
+let chatAuthPending = false;
+// #967 慢重试看门狗：IDB_RETRY_MAX 的 6 次快重试（5s 一档）耗尽后旧实现永久放弃，而「在飞链
+// 被冻结 / 大键读超时」这类失败往往几十秒后才恢复 ⇒ 屏上永久空白且无读库入口。看门狗在
+// 「聊天页可见 + 权威未达 + 非确认空库」期间每 15s 补一次真读（forceIdb 绕过去重闸），权威一到
+// 即自停；离开聊天页不空转（重进聊天走 enterChat 自身那条链）。
+const CHAT_AUTH_WATCH_MS = 15000;
+let authWatchT = null;
+// #967 权威到手判定：读到权威数据（含空数组）或确认空库都算「有结论」；只有保险丝置真的
+// ready 不算（那正是空屏的来源）。
+function chatAuthSettled() { return chatKnownEmpty || (chatDbReady && !chatAuthPending); }
 let pendingLocal = null; // 权威就绪前暂存的内存消息（绝不落盘，防止污染读取/覆盖 IDB）
 // ===== v3.26.x 止血：聊天大包（含图片 base64）避免「每个交互同步全量写」 =====
 // 根因：chat-msgs 单键可达数百 MB（图片 base64 内联），saveMsgs/saveMsgsNow 每次
@@ -76,6 +92,8 @@ msgs = [];
 pendingLocal = null;
 chatDbReady = false;
 chatKnownEmpty = false; // FIX 2026-09-15 #526：换桌面重新判定
+chatAuthPending = false; // #967：新桌面重新判定权威未达状态
+stopChatAuthWatch(); // #967：看门狗按桌面重启（旧桌面的等待不得跨桌面续命）
 chatBlkResetState(); // #722：换桌面＝分块/热片/冷头状态全部复位（新桌面读自己的块或旧整包）
 sessionChangedIdx.clear();
 // FIX 2026-09-15 #489：切桌面即作废屏上渲染凭据——聊天 body 的旧 DOM 属于上个会话，
@@ -941,8 +959,23 @@ let authLoadedPrefix = null;
 let idbRetryTimer = null;
 let idbRetryCount = 0;
 const IDB_RETRY_MAX = 6;
+// FIX 2026-09-21 #967：慢重试看门狗（见 CHAT_AUTH_WATCH_MS 声明处注释）。
+// 只读、幂等、绝不抛；每次装载单飞（authWatchT 非空即返回）。
+function armChatAuthWatch() {
+if (authWatchT) return;
+authWatchT = setTimeout(function () {
+authWatchT = null;
+try {
+if (chatAuthSettled()) return;
+if (!chatVisible()) return; // 离开聊天页＝不空转（重进聊天走 enterChat 那条链并重新武装看门狗）
+loadMsgs(true);
+armChatAuthWatch();
+} catch (e) {}
+}, CHAT_AUTH_WATCH_MS);
+}
+function stopChatAuthWatch() { if (authWatchT) { clearTimeout(authWatchT); authWatchT = null; } }
 function scheduleIdbRetry() {
-if (idbRetryTimer || idbRetryCount >= IDB_RETRY_MAX) return;
+if (idbRetryTimer || idbRetryCount >= IDB_RETRY_MAX) { armChatAuthWatch(); return; } // #967：快重试耗尽＝看门狗接手，绝不永久放弃读库
 idbRetryCount++;
 idbRetryTimer = setTimeout(function () {
 idbRetryTimer = null;
@@ -1870,6 +1903,8 @@ const myPrefix = window.activePrefix();
 if (!forceIdb && _lmChainBusy === myPrefix && Date.now() < _lmChainBusyUntil) return;
 _lmChainBusy = myPrefix;
 _lmChainBusyUntil = Date.now() + 12000;
+chatAuthPending = true; // #967：本条链起读＝权威未达（进度条据此保持，"数据到没到"不再由保险丝冒充）
+armChatAuthWatch(); // #967：链一起就给看门狗兜底（快重试被打断/饿死时仍有慢重试）
 // v3.26.x #90：先补读条数账本（小键，几乎不会超时）。大键读取失败时它是唯一
 // 能回答「库里到底有多少条」的依据，落盘守卫全靠它。
 try { chatLedgerLoad(myPrefix); } catch (e) {}
@@ -1965,6 +2000,8 @@ return;
 function enterConfirmedEmpty() {
 chatDbReady = true;
 chatKnownEmpty = true; // FIX 2026-09-15 #526：确认空库＝无历史可读
+chatAuthPending = false; // #967：确认空库＝有结论，进度条收起是正确语义
+stopChatAuthWatch(); // #967：空库＝读库有结论，看门狗下班
 idbRetryCount = 0;
 _lmChainBusy = null; // #952：空库确认收尾，放行后续 loadMsgs
 authLoadedPrefix = myPrefix;
@@ -1997,7 +2034,10 @@ try {
 __prof('ch0_enter');
 let idbArr = typeof v === 'string' ? JSON.parse(v) : v;
 __prof('ch1_parsed');
-if (!Array.isArray(idbArr)) { chatDbReady = true; chatKnownEmpty = false; _lmChainBusy = null; return; } // #952 收尾清在飞标记
+if (!Array.isArray(idbArr)) { // #967：读到不可用形态（脏值/异格式）＝按读失败处理——旧实现只置 ready 就 return，
+// 屏上什么都没有却收掉进度条且再无重试（与「读超时」同样的永久空屏）；写盘闸门语义（ready 放开）保持原样。
+chatDbReady = true; chatKnownEmpty = false; _lmChainBusy = null; // #952 收尾清在飞标记
+scheduleIdbRetry(); return; }
 // FIX 2026-09-16 #594（用户报障：切换桌面联系人→打开聊天，所有消息变 2 条再回弹恢复；
 // 无头实测精确复现——种 12 条表情包字卡的桌面，切过去开聊天 msgs/DOM 双双变 24，每条
 // 一份 @@m: 令牌 + 一份原文 base64 相邻成对）：
@@ -2090,6 +2130,8 @@ __prof('ch5_passes');
 pendingLocal = null;
 chatDbReady = true;
 chatKnownEmpty = false; // FIX 2026-09-15 #526：读到权威数据（含空数组）＝不再是「已知空库」，进度条交回常规判定
+chatAuthPending = false; // #967：权威到手，进度条交回常规判定
+stopChatAuthWatch(); // #967：权威到手＝看门狗下班
 // v3.14.x：本命名空间已读到权威（此后空数组落盘才被允许——内存已含全部历史）
 authLoadedPrefix = myPrefix;
 idbRetryCount = 0;
@@ -2124,10 +2166,14 @@ __prof('ch7_end');
 if (chatVisible() && chatNearBottom()) {
 // v3.26.x #220：权威数据与屏上快照同窗同貌时原地补丁（不整窗重建=不闪）；
 // 条数不同（快照缺尾部）/渲染后台归一化改过窗口/非同桌面 → 照旧整窗重渲
+// #1010：收尾这一段（换装 + 屏上媒体解码）全程持有进度条——先置位再动 DOM，
+// 落地后由 chatSettleHoldSettle 收（无未解码图＝当场收，行为与旧版一致）
+chatSettleHoldArm(); // #1010：权威收尾在飞（换装 + 视口媒体解码）——进度条持有到本段结束
 if (!inplacePatchIfSameWindow()) {
 renderWindow(false, true);
 scrollChatBottom();
 }
+chatSettleHoldSettle();
 } else if (chatVisible()) {
 // FIX 2026-09-13 #407：不贴底（用户正在翻历史）时 #220 有意不重渲防闪，但 msgs 已变
 // （下标可能位移）——屏上窗口凭据作废，防后续同窗补丁在陈旧 DOM 上误patch；
@@ -2137,8 +2183,10 @@ windowStale = true;
 } else if (chatVisible() && msgs.length && !body.children.length) {
 // v3.26.x：冷加载（切桌面后 msgs=[]、无本地待合并，changed=false 原路径不会重渲）——
 //   读库完成后聊天页仍开着且消息区为空 → 补渲染一次（同时隐藏加载进度条）
+chatSettleHoldArm(); // #1010：冷加载首渲同样走收尾媒体窗
 renderWindow(false, true);
 scrollChatBottom();
+chatSettleHoldSettle();
 }
 // FIX 2026-09-15 #478（TASKS #131① 真缺陷定性；#480 已让位给并行会话的 tabbar 掉出 .phone 回归）：权威读库成功必须保证 LS 快照存在。
 // v3.9 修复3「读库成功写快照」被 OOM 批的 !hasLocal 快路径打掉——冷启动/切联系人（最常见
@@ -2545,9 +2593,85 @@ return !!(p && !p.hidden);
 //   权威到达时 200 气泡+百张图集中解码＝「没有加载缓冲动画、卡几秒」（无头 4× 节流实证：
 //   进度条全程未显示、803ms 长任务）。只要权威未就绪且聊天页可见就显示；就绪即收起。
 let chatRebuilding = false; // #841：分帧整窗重建的「列表已清空、新内容未换装」空窗期——该窗口必须显示进度条，否则用户看到的是闪白/闪旧记录＝当成 bug
+// FIX 2026-09-21 #1010 收尾媒体窗（用户实报「数据加载弹窗消失之后，聊天记录还会闪一下才恢复」）：
+//   权威回读收尾除了「换装列表」还有第二段可见变化——屏上这些气泡里的图片是**迟到解码**的
+//   （dataURL 解码 / 媒体池令牌解析 / 懒加载补图），收尾当帧只是把 <img> 节点换上，位图落地
+//   往往在几百 ms 后，届时整列高度一次性长出来（无头 8× 节流实测：收尾瞬间 h 26804→42791、
+//   scrollTop 随贴底重钉跳 26k px）。进度条的旧条件只认「数据到没到」（chatDbReady /
+//   chatAuthPending / chatRebuilding），收尾一落地就撤 ⇒ 用户看到的顺序恰好是「弹窗先消失、
+//   记录再闪一下」。这里把「收尾的屏上媒体解码」也算进进度条的持有条件：权威收尾换/补过屏上
+//   媒体节点时，进度条留到这些图解码落地（或 1.2s 上限）才撤；收尾没碰媒体（纯文本历史、无图
+//   可补）＝当场撤，行为与旧版逐字节相同（同一同步任务内先置后撤，中间无绘制）。
+let chatSettleHoldUntil = 0;
+let chatSettleHoldT = null;
+let chatSettleHardUntil = 0;
+// 视口内还有没解码完的图片（只算视口±40px 内＝用户真会看到的那些；视口外的 lazy 图可能
+// 永远不触发加载，算进来只会把进度条白拖到 deadline）
+function chatMediaPendingCount() {
+try {
+const list = body.querySelectorAll('img.msg-img');
+if (!list.length) return 0;
+const br = body.getBoundingClientRect();
+const top = br.top - 40, bot = br.bottom + 40;
+let pending = 0;
+for (let i = 0; i < list.length; i++) {
+const im = list[i];
+if (im.complete && im.naturalWidth) continue;
+const r = im.getBoundingClientRect();
+if (r.bottom < top || r.top > bot) continue; // 视口外（懒加载未触发）不计
+pending++;
+}
+return pending;
+} catch (e) { return 0; }
+}
+function chatSettleHoldOn() { return chatSettleHoldUntil > 0; }
+// 分帧换装（renderWindow 的 setTimeout(buildChunk) 链）在飞时不能判「无未解码图」——那一刻
+// DOM 还是空的（frag 未换装），误判成「收尾已落地」会让进度条先撤、图再落地＝原症状。此时
+// 把 deadline 往后顺延（硬上限 chatSettleHardUntil 兜底，防构建卡死把进度条钉死）。
+function chatSettleHoldDefer() {
+chatSettleHoldUntil = Math.min(chatSettleHoldUntil + 400, chatSettleHardUntil);
+if (!chatSettleHoldT) chatSettleHoldT = setTimeout(chatSettleHoldPoll, 120);
+}
+function chatSettleHoldPoll() {
+chatSettleHoldT = null;
+if (!chatSettleHoldOn()) return;
+if (!chatVisible()) {
+chatSettleHoldUntil = 0;
+try { updateChatLoading(); } catch (e) {}
+return;
+}
+if (batchRendering) { chatSettleHoldDefer(); return; }
+if (chatMediaPendingCount() === 0 || performance.now() > chatSettleHoldUntil) {
+chatSettleHoldUntil = 0;
+try { updateChatLoading(); } catch (e) {}
+return;
+}
+chatSettleHoldT = setTimeout(chatSettleHoldPoll, 120);
+}
+// 收尾开始：置位（进度条此期间不收；deadline 防「有图永不 complete」把进度条钉死）
+function chatSettleHoldArm() {
+chatSettleHoldUntil = performance.now() + 1200;
+chatSettleHardUntil = chatSettleHoldUntil + 6000;
+}
+// 收尾落地：屏上已无未解码图 → 当场收（同一任务内无中间绘制＝不闪）；否则等解码（≤deadline）
+function chatSettleHoldSettle() {
+if (!chatSettleHoldOn()) return;
+if (!chatVisible()) {
+chatSettleHoldUntil = 0;
+try { updateChatLoading(); } catch (e) {}
+return;
+}
+if (batchRendering) { chatSettleHoldDefer(); return; } // 换装未落定：等 finishSwap 再判
+if (chatMediaPendingCount() === 0) {
+chatSettleHoldUntil = 0;
+try { updateChatLoading(); } catch (e) {}
+return;
+}
+if (!chatSettleHoldT) chatSettleHoldT = setTimeout(chatSettleHoldPoll, 120);
+}
 function updateChatLoading() {
 if (!chatLoadingEl) return;
-chatLoadingEl.hidden = !(chatVisible() && (!chatDbReady || chatRebuilding) && !chatKnownEmpty); // #703：去掉「msgs 为空」前置 · #841：重建空窗期同样显示
+chatLoadingEl.hidden = !(chatVisible() && (!chatDbReady || chatRebuilding || chatAuthPending || chatSettleHoldOn()) && !chatKnownEmpty); // #703：去掉「msgs 为空」前置 · #841：重建空窗期同样显示 · #967：权威未达同样显示（保险丝置真不代表数据到了，空屏必须一直有提示）· #1010：收尾媒体解码未落地同样显示（否则「弹窗先消失、记录再闪一下」）
 }
 // FIX #162（iPad Air 7 / iPadOS 26 Safari：对方回一条消息视图就向上漂一次，不贴最新消息）
 // 贴底钉住态：程序化滚到底时置真，用户手动触摸/滚轮滚动即解除；复写与图片补滚只在钉住时进行
@@ -2624,10 +2748,19 @@ return cb.scrollHeight - cb.scrollTop - cb.clientHeight < 120;
 // 恰好落在离底 24~120px 区间，用户一上翻阅读、一轻点就误判回钉被拽回最底。贴底=距最大
 // scrollTop 只剩 ≤8px（.chat-body 底部还有 padding-bottom:24px 的呼吸区，用户读最新消息时
 // 离底必然 >24px，互不混淆）。
+// FIX 2026-09-21 #998（红米 K80 Chrome 实报「联系人发消息，最新消息总是不会跟随自动滑动到最
+// 底部，需要我自己滑动到最底下」，用户点名其他机型同现、要求勿致跨机型回归）：本判定必须与写方
+// scrollChatBottom() 用**同一把尺子**。写方落点是 chatScrollMax()（已扣掉「对方正在输入」行高 T），
+// 读方却用裸 scrollHeight − clientHeight——而打字行恰好在每条来消息落地前显示 0.4~1.4s（正是用户
+// 会去点/滑的那段窗口），行显示期真贴底时裸口径读出「离底 T≈22px > 8」＝假解钉态：轻点回钉
+// （touchend）与滚动落定回钉两条恢复路一起失效，钉住态再也回不来，此后每条来消息都不跟底
+// （无头实证：一次轻点即失底，之后连发 gap 累积到 133.7px、最新一条整条落在消息区下方 +38.7px）。
+// 改用 chatScrollMax()：贴底＝距真最大值 ≤8px，与行是否显示无关（#416 的 8px 口径、以及「用户读
+// 最新一条时离底必然 >24px 的呼吸区」结论零变化，橡皮筋超界仍判真）。纯几何、零机型/内核分支。
 function chatAtBottom() {
 const cb = document.getElementById('chat-body');
 if (!cb) return true;
-return cb.scrollHeight - cb.scrollTop - cb.clientHeight <= 8;
+return chatScrollMax() - cb.scrollTop <= 8;
 }
 // FIX 2026-09-15 #492（帮我决定/多人决定结果发到聊天后聊天记录不自动滑到最新消息，多机型同报）：
 // 用户主动触发的「来向」消息一次性跟底标记——chatAddIn({follow:true}) 置位、此处消费。决策结果
@@ -2648,7 +2781,13 @@ if (userFollow) chatUserFollowScroll = false;
 // 改按钉住标记——内核丢弃首写/图片迟到解码顶开后，视口离底会超 120px，旧 nearGcBottom
 // 闸把后续每条来消息都误判成「在看历史」永不跟底；用户手动接管（触摸/滚轮解钉）与
 // 搜索/引用跳转定位（#334）本就解除钉住，chatPinnedBottom 已完整表达「别打扰」
-if (!out && !userFollow && !chatPinnedBottom) return;
+// FIX 2026-09-21 #998：跟底判据补一条「视口此刻就在真底部」——chatPinnedBottom 是**可过期的标记**
+// （一次触摸即解钉，恢复路一旦被时序错过就永久失真），而「用户此刻停在最新一条上」是几何事实。
+// 两者取或：标记说钉住 ⇒ 照旧跟底（#378/#162 契约零改动）；标记失真的解钉态、但视口就在真最大值
+// ≤8px ⇒ 这条来消息照样跟底（用户本来就在看最新消息，落一条新消息没有任何理由不给他看，且
+// scrollChatBottom 当场把标记复位＝自愈）。用户真在上翻阅读（离底 >8px）时两条都不成立，仍是
+// 「绝不打扰」——#416 口径零改动。判据与写方同尺（chatAtBottom ⇒ chatScrollMax）＝不受打字行影响。
+if (!out && !userFollow && !chatPinnedBottom && !chatAtBottom()) return;
 	if (out || userFollow) {
 	// 自己发(out) / 用户主动触发的 follow（决策结果等）：保持瞬时落底——本人的消息即刻到底才自然
 	scrollChatBottom();
@@ -3543,8 +3682,10 @@ body.addEventListener('pointerup', rpClearPress);
 body.addEventListener('pointerleave', rpClearPress);
 body.addEventListener('pointercancel', rpClearPress);
 body.addEventListener('click', (e) => {
-if (!e.target.closest('.msg-ask-card, .msg-choose-card, .msg-fav-heart, .msg-inplace')) {
-body.querySelectorAll('.msg-ask-card.show-fav, .msg-choose-card.show-fav').forEach(c => c.classList.remove('show-fav'));
+// #1005 问卷卡也进「点卡片浮现收藏」这一套：守卫必须认得 .msg-survey-card，否则点问卷卡时
+// 会先被这里把它自己的 .show-fav 抹掉再补上（切不成开关）；点卡片外也要能把它的心形收起来。
+if (!e.target.closest('.msg-ask-card, .msg-choose-card, .msg-survey-card, .msg-fav-heart, .msg-inplace')) {
+body.querySelectorAll('.msg-ask-card.show-fav, .msg-choose-card.show-fav, .msg-survey-card.show-fav').forEach(c => c.classList.remove('show-fav'));
 }
 const favBtn = e.target.closest('.msg-fav-heart');
 if (favBtn) {
@@ -3629,6 +3770,12 @@ if (e.target.closest('.msg-inplace')) return;
 const surveyCard = e.target.closest('.msg-survey-card');
 if (surveyCard) {
 e.stopPropagation(); // 不冒泡触发气泡操作菜单
+// #1005 收藏心形默认隐藏、点卡片才浮现（再点卡片外收起）——用户报「批量设置问卷后发送到聊天里
+// 的卡片直接显示了收藏的按钮」。与单题卡同一套 .show-fav 开关：先记本次点击前的状态，清掉别处
+// 已浮现的心形后按需加回本卡（＝点一下浮现、再点一下收起），随后照旧打开问卷详情。
+const sHadFav = surveyCard.classList.contains('show-fav');
+body.querySelectorAll('.msg-ask-card.show-fav, .msg-choose-card.show-fav, .msg-survey-card.show-fav').forEach(c => c.classList.remove('show-fav'));
+if (!sHadFav) surveyCard.classList.add('show-fav');
 const sItem = surveyCard.closest('.msg-survey');
 const sIdx = sItem && sItem.dataset.idx !== undefined ? Number(sItem.dataset.idx) : -1;
 const sRec = sIdx >= 0 ? msgs[sIdx] : null;
@@ -3776,23 +3923,31 @@ let appendTarget = null;
 // 整体覆盖 className，msg-enter 在挂载前就被抹掉＝动画实际从未触发。类补加挪到
 // appendMsg 挂载前（此处恒在各分支覆盖之后）；batchRendering 闸口径不变：
 // 批量渲染/原位重画不入场动画。
-function appendMsg(m) { if (!batchRendering) m.classList.add('msg-enter'); (appendTarget || body).appendChild(m); }
+// FIX 2026-09-21 #1004：整窗分帧构建在飞时落地的消息**绝不写进本轮 appendTarget**（DocumentFragment）
+// ——写进去只有两种下场，两种都是用户可感知的坏形态：①本轮稍后被新一轮 renderWindow 作废 ⇒ 节点随
+// fragment 一起丢弃，而这条已进 msgs、循环又已越过它的下标（len 是开轮时取的快照，不会再回头画）
+// ⇒ 屏上永久少一条（用户所报「显示不全」）；②本轮正常换装 ⇒ 节点被插在「构建进度」那个位置
+// （fragment 尾），后面几批消息整批 append 在它后面 ⇒ 新消息埋进列表中间（用户所报「发消息后位置
+// 错位」）。改法＝暂存进 batchDefer.q，换装完成（body.appendChild(frag) 之后）按到达顺序补挂到列表尾；
+// 本轮作废则整队丢弃（新一轮按 msgs 全量重画）。判据只有「下标 ≥ 开轮时的 msgs.length」这一个
+// 与设备/内核无关的量。
+let batchDefer = null;
+function appendMsg(m) {
+if (!batchRendering) m.classList.add('msg-enter');
+if (batchDefer) {
+const ix = Number(m.dataset.idx);
+if (Number.isFinite(ix) && ix >= batchDefer.len) { batchDefer.q.push(m); return; }
+}
+(appendTarget || body).appendChild(m);
+}
+// FIX 2026-09-21 #972（用户实报 OPPO Find X9 Edge「聊天发消息后气泡+头像一起消失、位置错位、重启才
+// 复原」）：批量头像缓存必须**永远新建**。旧写法 「if (on) { if (!avatarBatchCache) avatarBatchCache = {}; }」
+// 在批量轮被新一轮 renderWindow 顶掉时（两条早退路径都跳过末尾的 appendAvatarBatch(false)）会把缓存
+// 残留在全局变量上，此后每一轮都因「已存在」不再新建＝整场会话吃那份旧快照：之后每条新渲染的消息
+// （renderMsg → fillAvatar）读到的都是泄漏那一刻的头像值（换过桌面＝别的桌面的头像，读不到＝灰占位
+// ＝「头像消失」），fillAvatar 的命中缓存 __avApplied 又把错值钉在节点上，只有刷新才恢复＝「重启后复原」。
+// 新建后泄漏最多影响那一轮；作废路径另按对象身份释放（见 myAvBatch）。
 function appendAvatarBatch(on) {
-// FIX 2026-09-21 #972 批量头像缓存「泄漏后被永久复用」根治（用户实报 OPPO Find X9 Edge：
-//   聊天发消息后消息气泡/头像一起消失、位置错位，重启才复原；点名多机型同现）。
-//   旧实现 `if (on) { if (!avatarBatchCache) avatarBatchCache = {}; }` 有个致命口子：
-//   批量轮**作废**时（被新一轮 renderWindow 顶掉）两条早退路径（finishSwap / buildChunk 的
-//   `if (myToken !== _rwToken) return;`）都会跳过末尾的 appendAvatarBatch(false)，缓存于是
-//   泄漏为非 null；此后每一轮 `appendAvatarBatch(true)` 因为「已存在」**不再新建**，等于整场
-//   会话都在吃那份旧快照——之后每一条新渲染的消息（renderMsg → fillAvatar）读到的都是泄漏
-//   那一刻的头像值：换过桌面就是别的桌面的头像，读不到就是 null → 渲染成灰色占位图标
-//   （＝用户所见「头像消失」），而 fillAvatar 的 #617 早退缓存 __avApplied 会把这个错值钉死
-//   在节点上，只有刷新页面（缓存为空、重新读库）才恢复（＝用户所见「重启后复原」）。
-//   这条机制本文件 2486 行注释早就记录过（「avatarBatchCache 残留后 fillAvatar 永远读缓存
-//   旧值，刷新页面才恢复」），但当时只在 refreshChatAvatars 一个调用点擦屁股，源头没堵。
-//   收口：①批量轮开始**永远拿全新缓存**——泄漏即使再发生也只影响那一轮，下一轮自动干净；
-//   ②两条早退路径各自释放自己那一轮的缓存（见 myAvBatch），作废不再留下残留。
-//   零机型分支：判据只有「谁创建了这个缓存对象」这一个对象身份，与内核/设备无关。
 if (on) avatarBatchCache = {};
 else avatarBatchCache = null;
 }
@@ -3840,6 +3995,40 @@ let normSnapTail = null;
 // 权威读库收尾据此对这些下标原位换节点补真实媒体（见 inplacePatchIfSameWindow）。
 // 必须在渲染时刻登记：权威合并后 msgs 已是全量数据，事后扫描扫不出「屏上渲的是精简」。
 let windowRenderedLite = null;
+// FIX 2026-09-21 #1010 屏上窗口身份凭据（打开聊天「数据加载弹窗消失后记录还要闪一下」的真因收口）：
+//   windowRenderedN 只记「条数」，判不出「屏上这一窗到底是权威数组的哪一段」。#241 的同窗补丁
+//   按「屏上是权威的前缀」这一假设工作，而 LS 兜底快照是**尾部切片**（performLsSnapWrite 超 2MB
+//   从最旧折半丢弃，留下的正是最近一段），它渲染出的 data-idx 是**快照内的局部下标**（0..k-1）；
+//   权威回读后同一批记录的真实下标是 len-k..len-1。旧判据只看「DOM 下标恰为 renderStart..
+//   windowRenderedN-1 顺序排列」——局部下标天然满足，于是①lite 残留原位升级按错位下标取 msgs[i]，
+//   把最旧那几条的媒体塞进最新几个气泡（内容串位）；②grown=len-k 触发尾部增量追加，把同一批记录
+//   再画一遍，随后 prune 又削掉错位节点＝一次「记录整批闪动+重排」（41MB 级历史必然命中：快照必被
+//   剥媒体且折半）。补两条身份凭据：整窗渲染时记下窗口首/尾记录的身份键（媒体载荷不参与——同一条
+//   消息在 LS 精简态与权威态存法不同，身份必须一致），收尾时据此判定「前缀 / 尾部切片 / 说不清」，
+//   尾部切片走下标整体平移（零节点重建、零追加、零剪枝）。
+let windowKeyLo = -1;
+let windowKeyHi = -1;
+let windowKeyLoVal = '';
+let windowKeyHiVal = '';
+// 身份键：时间戳+方向+类型+special+正文。**媒体/占位载荷一律不参与**——同一条消息在 LS 精简态
+// 与权威态的存法不同（媒体记录正文被 liteSnapArray 换成 '[内容已省略]' 或剥空，媒体池令牌化后
+// 又是 '@@m:hash'），身份必须一样；special 类（拍一拍/系统提示）正文即语义，但也只认 ts|side|special
+// 三元组，避免两侧措辞差异把身份判丢。不做哈希——同毫秒同向同类同正文的两条记录极罕见（合并去重
+// 早已收敛），且判定要求首尾两端同时命中，误判概率可忽略；判错的后果只是退回整窗重建（保守方向）。
+function chatWinKey(m) {
+if (!m || typeof m !== 'object') return '#';
+const t = (typeof m.text === 'string') ? m.text : '';
+const mediaish = !!(m.img || m.voice || m.type === 'image' || m.type === 'sticker' || m.type === 'voice' || m.special || m._lsLite || t === '' || t === '[内容已省略]');
+return (m.ts || 0) + '|' + (m.side || '') + '|' + (m.type || '') + '|' + (m.special || '') + '|' + (mediaish ? 'M' : t.length + ':' + t.slice(0, 24));
+}
+function chatWinKeysSync() {
+try {
+windowKeyLo = renderStart;
+windowKeyHi = renderEnd - 1;
+windowKeyLoVal = (renderStart >= 0 && renderStart < msgs.length) ? chatWinKey(msgs[renderStart]) : '';
+windowKeyHiVal = (windowKeyHi >= 0 && windowKeyHi < msgs.length) ? chatWinKey(msgs[windowKeyHi]) : '';
+} catch (e) { windowKeyLo = -1; windowKeyHi = -1; windowKeyLoVal = ''; windowKeyHiVal = ''; }
+}
 const TIME_DIVIDER_GAP = 5 * 60 * 1000;
 function maybeInsertDivider(idx) {
 if (store.get('cs-time-style') !== 'divider') return;
@@ -3854,16 +4043,14 @@ if (cur.ts - prev.ts < TIME_DIVIDER_GAP) return;
 const d = document.createElement('div');
 d.className = 'msg-time-divider';
 d.innerHTML = '<span>' + timeDividerText(cur.ts) + '</span>';
-// FIX 2026-09-21 #972 时间分隔线「全摞堆在列表顶部」根治：批量整窗渲染时 body 先被
-//   innerHTML='' 清空、消息行全部进 appendTarget（DocumentFragment），而这里却无条件
-//   写 body.appendChild(d)——于是分隔线留在空 body 上、消息随后整批 append 在它们**后面**：
-//   一次整窗渲染就把**全部**分隔线摞到列表最顶部（无头实测 1008 条历史：198 条分隔线
-//   连排堆在头部、最长连排 198，长度全等的一个都不在消息之间）。用户所见＝时间轴全错位、
-//   列表 scrollHeight 被这 198 条凭空撑高数千 px（贴底/搜索跳转/裁剪补偿的几何全跟着错），
-//   之后窗口越限触发 trimWindowTopQuiet 一次性删掉整摞时 scrollTop 补偿被钳到 0＝视口
-//   突然弹走。与 renderMsg/appendMsg 同口径写进当前批量目标即可：批次内「分隔线→该条消息」
-//   的先后关系天然正确，三条批量路径（renderWindow / loadOlderIncremental / loadNewerIncremental）
-//   与单条追加（appendTarget 为 null 时回落 body）全部沿用同一行。零机型分支。
+// FIX 2026-09-21 #972：批量整窗渲染期本函数**必须与消息同行**——旧写法无条件 body.appendChild，
+// 而那一刻 body 刚被 innerHTML='' 清空、全部消息行都还在 appendTarget（DocumentFragment）里等换装，
+// 于是分隔线被 append 在空 body 上、消息随后整批 append 在它们**后面**：无头实测 199 条消息对应
+// 199 条分隔线全部连排堆在列表头部（时间轴顺序全错，滚动高度虚增数千 px，越限裁剪时 scrollTop 补偿
+// 被钳到 0＝视口弹走，越界裁剪还会把消息削掉＝「显示不全」）。判据只有「挂到哪个父节点」。
+// #1004：批量构建在飞时落地的分隔线同理不得插进本轮 fragment 中间（会插在窗口中部＝错位）——
+// 与 appendMsg 共用同一暂存队列，换装后按到达顺序补挂。
+if (batchDefer && idx >= batchDefer.len) { batchDefer.q.push(d); return; }
 (appendTarget || body).appendChild(d);
 }
 let suppressScrollUntil = 0; // 程序化滚动后短暂忽略 scroll 事件（防渲染本身触发向上加载）
@@ -3883,7 +4070,16 @@ function renderWindow(keepScroll, clampTop, forceSync) {
 chatRebuilding = false; // #841e：新一轮渲染先复位空窗标志（被作废的旧分帧轮不得把进度条留在屏上）
 const prevTop = keepScroll ? body.scrollTop : 0;
 const prevHeight = keepScroll ? body.scrollHeight : 0;
-if (clampTop) renderStart = Math.max(0, len - RENDER_MAX);
+// FIX 2026-09-21 #1004（用户实报「退出聊天页面回到桌面，然后再打开聊天页面，一片空白，没有任何
+// 聊天记录加载」）：窗口起点必须落在**本轮数据长度之内**。旧写法 「const start = Math.min(renderStart, len)」
+// 只把 start 钳进 [0,len]：renderStart ≥ len 时 start === len ⇒ 循环一条都不画，而 body 已被上面那句
+// innerHTML='' 清空 ⇒ 空白页；finishSwap 又把 windowRenderedN 登记成 len（＝「屏上是这份 msgs 的前 len 条」），
+// 进度条按「有内容或就绪」收起 ⇒ 用户看到的就是「一片空白、没有任何加载提示」，重进只走同窗补丁判定，
+// 白屏就一直停在那儿。renderStart 什么时候会越界：换桌面路径把 msgs 清空重读（contact-switched 里
+// msgs=[] 但 renderStart 不跟着复位）、合并/归一化把 msgs 缩短、任何缩表路径都可能。短离场回场、
+// 换时间样式（chatReRenderTime）这类 keepScroll 轮不会重算 renderStart，正是最常撞上的一枪。
+// 修法：起点越界时按「最新 RENDER_MAX 条」重开窗口（与 clampTop 同语义），空窗不可能发生。
+if (clampTop || renderStart >= len) renderStart = Math.max(0, len - RENDER_MAX);
 const start = Math.min(renderStart, len);
 renderEnd = len; // 整窗重建渲染到最新，窗口终点复位（裁剪状态随之清空）
 // v3.26.x #220：登记「屏上由哪份 msgs 渲染」——非整窗路径（增量追加/裁剪）不更新
@@ -3892,6 +4088,7 @@ windowRenderedN = len;
 windowRenderedPrefix = window.activePrefix();
 windowRenderedNicks = chatNickSig(); // #775b：整窗渲染＝屏上昵称已刷新，登记当时的昵称签名
 windowStale = false;
+chatWinKeysSync(); // #1010：登记屏上窗口首/尾记录身份（收尾据此判前缀 / 尾部切片）
 collectInplaceDrafts();
 windowRenderedLite = null;
 const _liteIdx = [];
@@ -3900,16 +4097,32 @@ batchRendering = true;
 const frag = document.createDocumentFragment();
 appendTarget = frag;
 appendAvatarBatch(true);
-const myAvBatch = avatarBatchCache; // #972：本轮自己的缓存对象身份——早退时只释放「还属于本轮」的那份，绝不误清新一轮的
+const myAvBatch = avatarBatchCache; // #972：本轮自己的缓存对象身份——作废时只释放「还属于本轮」那份，绝不误清新一轮的
+const myDefer = batchDefer = { len: len, q: [] }; // #1004：本轮开轮时的条数快照（迟到节点判据）＋暂存队列
+const skippedIdx = []; // #1004：本轮因「记录位不是对象」被 #919a 保护性跳过的下标（屏上少画一条，必须留痕）
 let i = start;
 const myToken = ++_rwToken;
 const finishSwap = function () {
-if (myToken !== _rwToken) { if (avatarBatchCache === myAvBatch) appendAvatarBatch(false); return; } // #972：作废轮也必须释放自己的批量头像缓存（旧版在这里 return＝缓存泄漏被后续轮次永久复用）
+// #972/#1004：作废轮也要收自己的尾巴——批量头像缓存按对象身份释放（旧写法在这里直接 return＝缓存
+// 泄漏被后续所有轮次永久复用），迟到队列整队丢弃（新一轮按 msgs 全量重画，不会漏条）。
+if (myToken !== _rwToken) { if (avatarBatchCache === myAvBatch) appendAvatarBatch(false); if (batchDefer === myDefer) batchDefer = null; return; }
 if (_liteIdx.length) windowRenderedLite = _liteIdx;
 appendAvatarBatch(false);
 appendTarget = null;
 batchRendering = false;
 body.appendChild(frag);
+// #1004：换装后按到达顺序补挂构建期迟到的消息/分隔线（下标都 ≥ 开轮长度，接在窗口尾即正确顺序），
+// 并把窗上凭据对齐到真实长度——否则 windowRenderedN 停在开轮值会骗过同窗补丁判定。
+if (myDefer.q.length) {
+for (let q = 0; q < myDefer.q.length; q++) body.appendChild(myDefer.q[q]);
+windowRenderedN = msgs.length;
+renderEnd = msgs.length;
+}
+batchDefer = null;
+// #1004：本轮有记录位不是对象被跳过的，屏上就少一条，而且此后没有任何补画入口（窗口是 [start,len)
+// 的连续区间，增量路径只补两端）⇒ 永久空洞。这里标记屏上已落后（windowStale，同窗补丁判定据此
+// 放弃就地收尾）并排一次自愈重画（见 armWindowHoleHeal）。
+if (skippedIdx.length) { windowStale = true; armWindowHoleHeal(skippedIdx); }
 if (keepScroll && prevHeight > 0) {
 body.scrollTop = prevTop + (body.scrollHeight - prevHeight);
 }
@@ -3923,14 +4136,15 @@ suppressScrollUntil = Date.now() + 200; // 本轮渲染/滚动结束后 200ms �
 restoreInplaceDrafts();
 chatRebuilding = false; // #841a：新内容已换装落定，交回常规判定
 updateChatLoading(); // 渲染完成（有内容或就绪）→ 隐藏加载进度条
+try { chatSettleHoldSettle(); } catch (e) {} // #1010：分帧换装落定后再判「视口媒体解码是否落地」——在飞期间上面那次 updateChatLoading 只靠 chatRebuilding 顶着，落定这一帧必须重判，否则进度条先撤、图再落地＝原症状
 if (chatPinnedBottom) chatEntrySettle(); // #841b：重建换装＝一次「进页」，重开 1.2s 同帧贴底窗，视口内图片迟到解码当帧收口，不等 250ms 看门狗拽把
 };
 const buildChunk = function () {
-if (myToken !== _rwToken) { try { restoreInplaceDrafts(); } catch (e) {} if (avatarBatchCache === myAvBatch) appendAvatarBatch(false); return; } // #718 作废：草稿回填旧 DOM（新轮 collect 会再收），不丢草稿；#972：同 finishSwap，作废轮释放自己的头像缓存
+if (myToken !== _rwToken) { try { restoreInplaceDrafts(); } catch (e) {} if (avatarBatchCache === myAvBatch) appendAvatarBatch(false); if (batchDefer === myDefer) batchDefer = null; return; } // #718 作废：草稿回填旧 DOM（新轮 collect 会再收），不丢草稿；#972/#1004：作废轮释放自己那轮的批量头像缓存与迟到队列
 const end = Math.min(i + RENDER_CHUNK, len);
 for (; i < end; i++) {
 const _rm = msgs[i];
-if (!_rm || typeof _rm !== 'object') continue; // #919a 记录位空洞/坏记录跳过不画：renderMsg(undefined) 抛 TypeError 打断整轮分帧构建（setTimeout 链断＝不换装不贴底、batchRendering 卡死，屏上停在窗口最旧的几十条、退出重进才恢复；用户设备 buildChunk→renderMsg「reading 'side'」实锤）
+if (!_rm || typeof _rm !== 'object') { skippedIdx.push(i); continue; } // #919a 记录位空洞/坏记录跳过不画：renderMsg(undefined) 抛 TypeError 打断整轮分帧构建（setTimeout 链断＝不换装不贴底、batchRendering 卡死，屏上停在窗口最旧的几十条、退出重进才恢复；用户设备 buildChunk→renderMsg「reading 'side'」实锤）
 maybeInsertDivider(i);
 if (_rm && (_rm._lsLite || _rm.img === '' || _rm.voice === '' ||
 (Array.isArray(_rm.parts) && _rm.parts.some(p => p && typeof p.v === 'string' && p.v === '')))) {
@@ -3950,7 +4164,7 @@ return;
 }
 for (; i < len; i++) {
 const _rm = msgs[i];
-if (!_rm || typeof _rm !== 'object') continue; // #919b 同 #919a：同步整窗路径也不得被单条空记录打断（异常一路上抛，调用方紧随的贴底/收尾整段跳过）
+if (!_rm || typeof _rm !== 'object') { skippedIdx.push(i); continue; } // #919b 同 #919a：同步整窗路径也不得被单条空记录打断（异常一路上抛，调用方紧随的贴底/收尾整段跳过）
 maybeInsertDivider(i);
 if (_rm && (_rm._lsLite || _rm.img === '' || _rm.voice === '' ||
 (Array.isArray(_rm.parts) && _rm.parts.some(p => p && typeof p.v === 'string' && p.v === '')))) {
@@ -4027,9 +4241,7 @@ if (windowRenderedN === 0) return false; // 无屏上凭据（首渲场景）走
 // （img/voice/超长文本→占位+_lsLite，见 liteSnapArray），每次打开聊天权威收尾都命中此处
 // =整窗清空重画=真机「闪屏+弹一下才正常」（小米15Pro 复发；#241 只覆盖「快照缺尾部」
 // 形态）。改为对这些下标原位换节点（权威合并后 msgs[i] 已是全量数据），其余节点零重建、
-// 窗口条数不变=滚动位置不弹。
-const liteUpgrade = (Array.isArray(windowRenderedLite) ? windowRenderedLite : [])
-.filter(i => i >= renderStart && i < windowRenderedN);
+// 窗口条数不变=滚动位置不弹。清单在下方「尾部切片平移」之后才取值（平移后下标才是权威系）。
 // DOM [data-idx] 须恰为 renderStart..windowRenderedN-1 顺序排列（时间分隔线无 data-idx 不计；
 // 有裁剪/位移/脏节点即放弃，走整窗重建兜底）
 let n = renderStart;
@@ -4042,6 +4254,46 @@ if (el.dataset.pendingRead === '1') pending.push(el);
 n++;
 }
 if (n !== windowRenderedN) return false;
+// FIX 2026-09-21 #1010 屏上窗口是「权威的尾部切片」时的下标平移（见 windowKey* 声明处注释）：
+// 判据＝屏上窗口首/尾两条记录的身份，分别命中权威数组的最后 windowRenderedN 条的首/尾
+//（媒体无关键，LS 精简态与权威态同键）。命中即认定「屏上内容本来就对，只是 data-idx 是
+// 快照内的局部下标」——把 DOM 下标与窗口凭据整体平移 delta，然后照常走 lite 原位升级
+//（此时下标已是权威系，升级取到的是正确记录），且不再追加/剪枝（窗口本就贴到最新）。
+// 前缀形态（#241：屏上确为权威前段）走原路径逐字节不变；两种都不成立＝整窗重建兜底。
+let winShift = 0;
+{
+const headIdx = renderStart;
+const cnt = windowRenderedN - renderStart;
+const tailIdx = len - cnt;
+const prefixShape = (windowKeyLoVal !== '' && headIdx >= 0 && headIdx < len && chatWinKey(msgs[headIdx]) === windowKeyLoVal);
+const tailShape = !prefixShape && cnt > 0 && tailIdx >= 0 && windowKeyHiVal !== '' &&
+chatWinKey(msgs[tailIdx]) === windowKeyLoVal && chatWinKey(msgs[len - 1]) === windowKeyHiVal;
+if (!prefixShape) {
+if (!tailShape) return false; // 说不清＝整窗重建兜底（保守）
+// #1010 边界：屏上窗口还没铺满一个渲染窗时（典型＝开机/系统消息只增量画了 1~2 条，
+// windowRenderedN 才 2）不能只平移——那等于把「最新 2 条」当成整个窗口，历史全不见。
+// 交回整窗渲染（内容正确，构建期由进度条罩着）。
+if (cnt < Math.min(len, RENDER_MAX)) return false;
+winShift = tailIdx - headIdx;
+if (winShift !== 0) {
+// ① DOM 下标整体平移（只改属性，不碰节点与内容＝零重建、零重排、零闪动）
+for (let k = 0; k < body.children.length; k++) {
+const el = body.children[k];
+if (el.dataset && el.dataset.idx !== undefined) el.dataset.idx = String(Number(el.dataset.idx) + winShift);
+}
+// ② 窗口凭据与 lite 残留清单同步平移（残留下标同样是快照内局部下标）
+renderStart += winShift;
+windowRenderedN = len;
+renderEnd = len;
+if (Array.isArray(windowRenderedLite)) windowRenderedLite = windowRenderedLite.map(function (i2) { return i2 + winShift; });
+// 窗口凭据已贴到最新 ⇒ 下面「尾部增量追加」按新凭据重算追加量为 0（不会把同一批记录再画一遍）
+chatWinKeysSync();
+try { (window.__patch1010Log = window.__patch1010Log || []).push('tail-shift:' + winShift + '/n' + cnt); } catch (e0) {}
+}
+}
+}
+const liteUpgrade = (Array.isArray(windowRenderedLite) ? windowRenderedLite : [])
+.filter(i => i >= renderStart && i < windowRenderedN);
 if (liteUpgrade.length) {
 // #245 残留原位升级：renderMsg 内部 appendMsg 落到 body 末尾后立刻 replaceChild 挪到
 // 原位（同一同步任务内无中间绘制）；batchRendering=true 抑制 msg-enter 入场动画与
@@ -4085,7 +4337,9 @@ b.textContent.indexOf('已读不回') >= 0) {
 b.innerHTML = '<span style="opacity:.5;font-size:12px">' + escTxt(rec.text || '已读不回') + '</span>';
 }
 }
-if (grown > 0) {
+// #1010：尾部切片平移过（winShift≠0）时窗口已贴到最新——不再走尾部增量追加，否则会按旧 grown
+// 把同一批记录再画一遍（屏上两份＋随后 prune 削节点＝用户看到的「记录整批闪一下再恢复」）。
+if (grown > 0 && !winShift) {
 // 尾部增量追加（复用滚动加载的增量路径：新条目照常渲染/锚定/prune，已有节点零重建）；
 // 追加没补齐（异常）返回 false，调用方整窗重建兜底（renderWindow 清空重来，状态自洽）
 for (let r = 0; r < Math.ceil(grown / LOAD_STEP) + 1 && renderEnd < len; r++) loadNewerIncremental(len);
@@ -4257,6 +4511,7 @@ windowRenderedLite = windowRenderedLite
 .filter(x => !rmSet.has(x))
 .map(x => x - shiftsBefore(x));
 }
+chatWinKeysSync(); // #1010：归一化结构删除后窗口下标平移，身份凭据同步
 const dH = body.scrollHeight - prevH;
 if (dH) {
 if (wasNearBottom) scrollChatBottom(); // 原贴底：删除后保持贴底
@@ -4295,6 +4550,7 @@ appendAvatarBatch(false);
 appendTarget = null;
 batchRendering = false;
 renderStart = newStart;
+chatWinKeysSync(); // #1010：上翻增量改了窗口头，身份凭据同步
 if (preNum > 0 && anchor) {
 // FIX 2026-09-13 #396（红米 K80 Chrome 等多机型「聊天/群聊滑动屏幕会弹」）：旧补偿式
 // beforeTop + anchor.offsetTop 读的是插入后首元素的 offsetTop＝插入高度 + .chat-body
@@ -4359,17 +4615,30 @@ else if (frag.childNodes.length) body.appendChild(frag);
 if (newEnd - renderStart > WINDOW_MAX) pruneWindowTop();
 suppressScrollUntil = Date.now() + 200;
 }
-// FIX 2026-09-21 #972：裁剪/钳位循环要能「按消息归属」看待时间分隔线——分隔线自身没有
-// data-idx，它归属紧随其后的那条消息（插入时就是插在该条前面）。旧口径对无 data-idx 的
-// 节点一律当「可删」，在分隔线已正确穿插之后会把「第一条被保留消息」头上的那枚分隔线
-// 一起削掉（丢时间轴标记）。归属取不到（分隔线后面没有消息行，正常不该出现）＝undefined，
-// 沿用旧口径当可删。
+// FIX 2026-09-21 #972：裁剪/钳位循环要能「按消息归属」看待时间分隔线——分隔线自身没有 data-idx，
+// 它归属紧随其后的那条消息（插入时就是插在该条前面）。旧口径对无 data-idx 的节点一律当「可删」，
+// 在分隔线已正确穿插之后会把「第一条被保留消息」头上的那枚分隔线一起削掉（丢时间轴标记）。
+// 归属取不到（分隔线后面没有消息行，正常不该出现）＝undefined，沿用旧口径当可删。
 function nodeKeepIdx(f) {
 if (!f) return undefined;
 if (f.dataset && f.dataset.idx !== undefined) return parseInt(f.dataset.idx, 10);
 const nx = f.nextElementSibling;
 if (nx && nx.dataset && nx.dataset.idx !== undefined) return parseInt(nx.dataset.idx, 10);
 return undefined;
+}
+// FIX 2026-09-21 #1004：渲染窗「记录位空洞」自愈——#919a/#919b 的 continue 保护了分帧链不被单条坏记录
+// 打断，但被跳过的下标此后没有任何补画入口（窗口是连续区间，增量路径只补两端），屏上就永久少一条。
+// 这里在这些位**全部变成真记录**之后补一次整窗重画：仍是空洞（数据侧确实缺记录）就直接返回
+// ＝不排队＝自终止，绝不空转。一次只排一枪，构建在飞/离开聊天页不落发。
+let _holeHealT = null;
+function armWindowHoleHeal(idxs) {
+if (_holeHealT) return;
+_holeHealT = setTimeout(function () {
+_holeHealT = null;
+if (batchRendering || !chatVisible()) return;
+for (let k = 0; k < idxs.length; k++) { const m = msgs[idxs[k]]; if (!m || typeof m !== 'object') return; }
+renderWindow(true, false);
+}, 700);
 }
 function pruneWindowBottom() {
 const targetEnd = renderStart + WINDOW_MAX;
@@ -4381,6 +4650,7 @@ if (idx !== undefined && idx < targetEnd) break; // 已到应保留区
 body.removeChild(last);
 }
 renderEnd = targetEnd;
+chatWinKeysSync(); // #1010：窗口尾变了，身份凭据同步
 }
 function pruneWindowTop() {
 const targetStart = renderEnd - WINDOW_MAX;
@@ -4392,6 +4662,7 @@ if (idx !== undefined && idx >= targetStart) break; // 已到应保留区
 body.removeChild(f);
 }
 renderStart = targetStart;
+chatWinKeysSync(); // #1010：窗口头变了，身份凭据同步
 }
 // v3.27.x #846「发完消息闪一下」专用钳位：与 pruneWindowTop 同为裁顶，但带上「视口不动」两件事
 // ——①只删 scrollTop 之上的节点（屏上可见区一个节点都不碰，故无重建无重解码）；②按删掉的高度
@@ -4407,6 +4678,7 @@ if (idx !== undefined && idx >= targetStart) break; // 已到应保留区
 body.removeChild(f);
 }
 renderStart = targetStart;
+chatWinKeysSync(); // #1010：窗口头变了，身份凭据同步
 const cut = h0 - body.scrollHeight;
 if (cut > 0) body.scrollTop = Math.max(0, body.scrollTop - cut);
 suppressScrollUntil = Date.now() + 200; // 本次程序化 scrollTop 写入不算用户滚动（否则补偿位会误触发上翻加载）
@@ -4551,12 +4823,27 @@ const cb868 = document.getElementById('chat-body');
 if (cb868 && chatScrollMax() - cb868.scrollTop > 8) scrollChatBottom(); // #416：≤8px 不折腾
 }
 setInterval(function () {
-if (!chatVisible() || !chatPinnedBottom || batchRendering || _ccSmoothT || chatTouchActive) return; // #716：触摸手势进行中不让路=看门狗与用户上滑对打
+if (!chatVisible() || batchRendering || _ccSmoothT || chatTouchActive) return; // #716：触摸手势进行中不让路=看门狗与用户上滑对打
 if (Date.now() - _chatScrollActTs < 200) return; // #765：列表滚动中（含抬手后的惯性滑行）不让路，落定后再复核
 if (Date.now() - _vvGeomChangeTs < 180) return; // 视口变形进行中不写，等落定
 if (Date.now() - _cbBoxChangeTs < 180) return; // #871：聊天盒还在变尺寸（mobile-adapt 分步恢复中）同样不写
 const cb706 = document.getElementById('chat-body');
 if (!cb706) return;
+// FIX 2026-09-21 #998：解钉态周期复核——「用户自己滚回真底部（≤8px）」＝「他在看历史」这个前提已消失，
+// 恢复自动跟底。这条语义 #378 早就写进了滚动监听，但那条是「滚动事件 + 100ms 防抖」的一次性判据：
+// 判完即止、副作用一过再没人复核，手势期一撞 chatTouchActive 就放弃且不续期＝钉住态永久丢失的根
+// （无头实证：上滑翻两下→滑回最底→按住停一下才抬手，抬手后停在最底 gap=0，来消息却不再跟底、
+// 连发 gap 累积到 133.7px）。这里补成周期复核，与下面「钉住态离底即补钉」同形对称。
+// 不在 touchend 就地回钉：抬手那一瞬惯性还没开始走（从底部往上甩时读数仍贴底），那时置钉会被本
+// 看门狗把用户的惯性滑行整段拽回底部＝#416/#716「往上滑被拽回最底」复发；本复核要等滚动/触摸/
+// 几何全静默（惯性走完）才判，天然不误判甩动。判据与写方同尺（chatAtBottom ⇒ 距真最大值 ≤8px）：
+// 只有贴底才回钉，绝不拽正在上翻的用户（#162/#416 零改动），写入交落定锁。零机型分支：写只发生在
+// 健康态重写同一个值。
+if (!chatPinnedBottom) {
+if (!chatAtBottom()) return;
+chatPinnedBottom = true; cb706.classList.remove('scroll-anchor-auto'); chatScrollRealignQuiet();
+return;
+}
 if (cb706.scrollTop < chatScrollMax() - 8) scrollChatBottom();
 }, 250);
 // FIX 2026-09-20 #933：滚动会话落定重对齐（缺陷面见上方 scroll 回调回钉分支的注释）——
@@ -4837,8 +5124,11 @@ rows += '<div class="msg-survey-item' + (a ? ' answered' : '') + '">' +
 return '<div class="msg-survey-card' + (done ? ' done' : '') + '">' +
 '<div class="msg-survey-head">你发出的问卷 · ' + qs.length + ' 题</div>' +
 '<div class="msg-survey-list">' + (rows || '<div class="msg-survey-item">（问卷内容缺失）</div>') + '</div>' +
-'<div class="msg-survey-tip">' + (done ? '已交卷 · 点击查看问卷详情' : 'TA 正在作答 · 已答 ' + nDone + '/' + qs.length + '，点击查看进度') + '</div>' +
-favHeartHtml(rec, true) +
+// #1005 底部提示行尾加一枚右向箭头＝「整张卡片可点」的暗示（提示文案本就写着「点击查看…」，
+// 心形改为点卡片才浮现后，卡片得自己把「能点」摆出来）；收藏心形默认隐藏，由 body click 的
+// surveyCard 分支加 .show-fav 浮现
+'<div class="msg-survey-tip">' + (done ? '已交卷 · 点击查看问卷详情' : 'TA 正在作答 · 已答 ' + nDone + '/' + qs.length + '，点击查看进度') + '<span class="msg-survey-chev">\u203A</span></div>' +
+favHeartHtml(rec) +
 '</div>';
 }
 // v3.33.x #521：问卷进度回写——ta-ask.js 在 TA 每答一题/交卷时调用，按 surveyTs 定位
@@ -5111,7 +5401,6 @@ m.innerHTML = '<div class="msg-gift-card">' +
 '<div class="msg-gift-wish">\u201C' + escTxt(rec.giftWish || '心意') + '\u201D</div>' +
 '<div class="msg-gift-foot"><span class="mg-side">' + escTxt(sideTxt) + '</span>' +
 '<span class="msg-gift-price">\u00A5' + escTxt(Number(rec.giftPrice || 0).toFixed(2)) + '</span></div>' +
-// #985：回复区（这条礼物上的回复，双方都能追加）＋动作区（联系人送我时：领取 + 回复）
 giftCardReplHtml(rec) +
 giftCardActsHtml(rec) +
 favHeartHtml(rec) +
@@ -6045,6 +6334,7 @@ try {
 if (!batchRendering && el) {
 windowRenderedN = Number(el.dataset.idx) + 1;
 windowStale = false;
+chatWinKeysSync(); // #1010：增量追加到新尾，身份凭据同步（否则下次收尾判不出前缀）
 }
 } catch (e) {}
 return el;
@@ -7619,6 +7909,20 @@ if (window.replyGuideHint) window.replyGuideHint('inv'); // v3.27.x #218 互动�
 return true;
 } catch (e) { return false; }
 };
+// v8.29 #1003：贴贴邀请手动触发（聊天「更多功能 → TA的提问 → 贴贴」）。走 taInvitePickKind('cuddle')
+// 只在贴贴池里抽——不复用上面的 taInvitePickAny（全类型随机，那是「邀请」那枚的口径，
+// 用户要的是点贴贴就一定是贴贴）。其余链路与「邀请」完全同源：同一个 sendTaInvite
+// （猜拳类开半框／贴贴类弹同意-拒绝确认、同意轻震+TA 回应、拒绝写系统消息+婉拒话术）。
+window.triggerTaCuddleNow = function () {
+try {
+const name = chatPartnerName();
+const inv = window.taInvitePickKind ? window.taInvitePickKind('cuddle') : null;
+if (!inv || !inv.text) { toast('TA的邀请题库里没有可用的贴贴话术'); return false; }
+sendTaInvite(inv, name);
+if (window.replyGuideHint) window.replyGuideHint('inv');
+return true;
+} catch (e) { return false; }
+};
 window.tryActiveInvite = tryActiveInvite;
 function tryAutoSend() {
 try {
@@ -7768,8 +8072,34 @@ if (chatResumeRepinT) clearTimeout(chatResumeRepinT);
 chatResumeRepinT = setTimeout(function () {
 chatResumeRepinT = null;
 if (!chatVisible() || !chatPinnedBottom || batchRendering) return; // 回场期用户已翻页/已解钉＝不抢
-if (chatScrollMax() - body.scrollTop > 8) { scrollChatBottom(); chatEntrySettle(); } // #416 同口径 ≤8px 不折腾
+chatResumeRealign(); // #978：回场贴底改「几何落定后同值重落一枪」——350ms 当场裸写正打在回场几何恢复风暴中段＝撕裂源
+chatEntrySettle(); // #930 保留：迟到长高（懒加载图/字体回填）当帧回钉
 }, 350);
+}
+// FIX 2026-09-21 #978（用户实报附截图「切后台然后再切回浏览器页面，聊天记录不贴底部输入栏上面了、
+// 最新消息整块顶到上半屏、下半全空」；同族第三发：#871 几何变动中途写⇒内核滚动树停旧偏移、#933
+// 回钉当场写，本次触发面＝回前台）：#930 的回场复核在固定 350ms 后**当场裸写** scrollChatBottom()——
+// 回场瞬间正是浏览器自身几何恢复风暴（系统栏回归/瓦片重建/视口复核），中途写 scrollTop ⇒ 滚动树停
+// 在旧偏移＝「内容整块上移、下方留白」。且撕裂态 scrollTop 读数 ≥ max−8（写其实落了，只有滚动树/
+// 绘制错位）：本函数旧「离底>8 才补」判据、#706 看门狗「scrollTop<max−8 才写」全数失明 ⇒ 用户停在
+// 坏态，只有轻点屏幕（touchend 同值写）才救得回。修法＝回场这一枪改「落定后写、写必同值重落」：
+// 几何/滚动全静默后才 scrollChatBottom()——健康态＝重写同一个值零副作用；撕裂态＝#871 真机实证的
+// 同值重落强制内核滚动树对新几何重对齐；3000ms 静默不了就放弃（交回 #706 看门狗/触摸恢复），一次
+// 回场只写一枪。#162（解钉态不拽底）、#416（≤8px 语义）零改动。纯时序判据、零机型分支。
+let _rsResumeT = null;
+let _rsResumeDeadline = 0;
+function chatResumeRealign() {
+if (_rsResumeT) return; // 已有一枪在膛：由它负责复查，不重复排队
+_rsResumeDeadline = Date.now() + 3000;
+_rsResumeT = setTimeout(chatResumeRealignStep, 120);
+}
+function chatResumeRealignStep() {
+_rsResumeT = null;
+const now = Date.now();
+if (!chatVisible()) return;
+if (!chatPinnedBottom) return; // #162：回场期用户已翻历史＝绝不拽底
+if (!chatRepinQuietEnough(now)) { if (now < _rsResumeDeadline) _rsResumeT = setTimeout(chatResumeRealignStep, 120); return; }
+if (chatPinnedBottom) scrollChatBottom(); // 同值重落：健康态重写同一个值；撕裂态＝强制内核滚动树重对齐
 }
 document.addEventListener('visibilitychange', function () {
 if (document.visibilityState === 'hidden') { chatHiddenAt = Date.now(); if (chatResumeRepinT) { clearTimeout(chatResumeRepinT); chatResumeRepinT = null; } }
@@ -7794,6 +8124,20 @@ if (!window.requestAnimationFrame) { setTimeout(run, 16); return; }
 requestAnimationFrame(function () { requestAnimationFrame(function () { setTimeout(run, 0); }); });
 setTimeout(run, 120); // 保险丝：后台标签/页面不可见时 rAF 会被节流甚至不派发，重活不能因此不跑
 }
+// FIX 2026-09-21 #967：回前台补读。用户实报「挂后台切回来会卡、聊天里什么也看不到」——后台期
+// 那半条读库链的 IDB 回调/定时器被内核冻结节流，回前台旧实现只做贴底复核（chatResumeRepin），
+// 没有任何重新起读的入口；若重试已耗尽就永久停在空屏。这里在「聊天页可见 + 权威未达 + 非空库」
+// 时补一发真读（forceIdb 绕过去重闸），权威已在手时零动作（正常回前台行为一字不变）。
+function chatResumeRearmRead() {
+try {
+if (!chatVisible() || chatAuthSettled()) return;
+stopChatAuthWatch();
+loadMsgs(true);
+} catch (e) {}
+}
+document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') chatResumeRearmRead(); });
+document.addEventListener('mochi-fg-resume', chatResumeRearmRead); // bg-keep 回前台统一信号（与 ta-ask/memo 同款通道）
+window.addEventListener('pageshow', function (e) { if (e.persisted) chatResumeRearmRead(); });
 function enterChat() {
 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
 const phoneTab = document.querySelector('.tab[data-page="page-phone"]');
@@ -9361,6 +9705,16 @@ bindTaNow('more-choose-now', () => { if (window.triggerTaChooseNow) window.trigg
 bindTaNow('more-curious-now', () => { if (window.triggerTaCuriousNow) window.triggerTaCuriousNow(); });
 bindTaNow('more-roast-now', () => { if (window.triggerTaRoastNow) window.triggerTaRoastNow(); });
 bindTaNow('more-invite-now', () => { if (window.triggerTaInviteNow) window.triggerTaInviteNow(); });
+// v8.29 #1003：三枚新增手动触发口（用户直派「回复设置里的贴贴邀请 / 邀请TA主动查岗 /
+// 邀请跨桌面查岗也是点击之后让联系人立即触发的功能」）——各自接自己那条既有入口，
+// 不新开触发链路：贴贴＝按类型抽贴贴话术后走 sendTaInvite；
+// 查岗＝字卡库「让TA现在查岗一次」同一个 triggerCkQuestion（题库/冷却/闸门口径全一致）；
+// 跨桌面查岗＝incoming-requests 的 triggerIncomingCheckinNow（挑一个开着查岗的其他桌面）。
+// FIX-REGRESSION #1003：贴贴这枚务必留在 taInvitePickKind('cuddle') 上，接回
+// taInvitePickAny 就变回「随机挑一种邀请」，用户点贴贴却收到猜拳＝本条的复发形态。
+bindTaNow('more-cuddle-now', () => { if (window.triggerTaCuddleNow) window.triggerTaCuddleNow(); });
+bindTaNow('more-ck-now', () => { if (window.triggerCkQuestion) window.triggerCkQuestion(); });
+bindTaNow('more-xck-now', () => { if (window.triggerIncomingCheckinNow) window.triggerIncomingCheckinNow(); });
 const moreDecide = document.getElementById('more-decide');
 if (moreDecide) {
 moreDecide.addEventListener('click', (e) => {
@@ -10840,12 +11194,13 @@ if (!f) return;
 if (window.addMyFavItem(f)) toast('已收藏互动卡片');
 else toast('已收藏过这张卡片');
 };
-// #713 批量问卷卡片收藏：always=true 常显（问卷卡整卡点击=看详情，没有单题卡那套
-// 「点卡片浮现 .show-fav」机制，心形藏起来就永远没人看得到）
-function favHeartHtml(rec, always) {
-const heart = '<button class="msg-fav-heart"' + (always ? ' style="display:inline-flex"' : '') + ' title="收藏整张互动卡片"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>收藏</button>';
+// #1005 收藏心形一律默认隐藏、点卡片浮现（.show-fav，见 body click 里各卡片分支）：#713 当年
+// 给问卷卡加的 always=true 常显按钮被用户点名「卡片直接显示了收藏的按钮」，现收回成与单题卡
+// 同一套机制（问卷卡的浮现分支在 surveyCard 那里）。
+function favHeartHtml(rec) {
+const heart = '<button class="msg-fav-heart" title="收藏整张互动卡片"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>收藏</button>';
 let time = '';
-if (!always && rec && rec.ts) {
+if (rec && rec.ts) {
 const who = rec.side === 'out' ? chatUserName() : chatPartnerName();
 time = '<div class="msg-fav-time">' + escTxt(who) + ' ' + fmtTime(rec.ts) + ' 发送</div>';
 }
@@ -12830,6 +13185,73 @@ hydrateCcForChatPanels(() => { if (emojiPanel && !emojiPanel.hidden) renderEmoji
 //   首屏别干等）；②按 DOM 序前 EMOJI_DECODE_AWAIT_MAX 张（≈首屏两三行）await decode 后即显示；
 //   ③其余已赋 src 的图 fire-and-forget 预热解码，不挡显示（滚动到时位图已就绪或按需即解）。
 const EMOJI_DECODE_AWAIT_MAX = 24;
+// FIX 2026-09-22 #1011 表情包面板「每次打开图片都会闪烁和重新加载」残留根因（红米 K80 Chrome
+//   实报、用户明说其他设备型号也有；#457/#508/#509/#662/#692/#704/#716/#907 八轮之后仍现）。
+//   上面那一串修复盯的是「节点有没有被重建」与「位图有没有被回收」，而真机上的那一拍其实是
+//   **面板在图片还没就绪时就显示了**：旧等待只对「此刻已经有 src 的图」逐个 await decode()，
+//   而首开/整页重载后这一拍一张 src 都没有——懒加载补 src 要等 IO 回调、池令牌解析要读 IDB，
+//   jobs 为空 ⇒ 等待当场放行。面板随后才逐张走「令牌当相对 URL 请求→404→池读 IDB→重写 src→
+//   解码」四段异步（无头 390×844 实测：面板可见当帧 24 张首屏里 8 张 src 还是 @@m: 令牌、仅 16
+//   张解码就绪，可见之后仍发生 21 次 load＋7 次 404 error）＝用户看到的「闪一下再一张张加载」。
+//   收口＝把等待判据从「有 src 就 await decode」换成「首屏每张图都拿到真载荷且解码完成」：
+//   首屏令牌当场交给媒体池批量解析（不等 250ms 的整组预热班次）、非令牌载荷当场补 src（不等
+//   懒加载泵），未就绪的图等自己的 load——池解析完重写 src 会触发 load，池确缺数据时 #397 的
+//   「图片缺失」占位图同样会 load ⇒ 等待不再是空的，也不会被挂着不放。兜底 2.5s 不变；等待期间
+//   面板不显示，故令牌解析中间态的裂图/alt 文案用户看不到。零机型分支、零新状态、零视觉改动。
+function emojiPanelFirstScreen() {
+  const out = [];
+  if (!emojiList) return out;
+  let imgs; try { imgs = emojiList.querySelectorAll('img'); } catch (e) { return out; }
+  if (!imgs || !imgs.length) return out;
+  let cr = null; try { cr = emojiList.getBoundingClientRect(); } catch (e) {}
+  const byRect = !!(cr && cr.height > 4); // 隐藏期 keep-alive 下几何仍成立，首屏按可视区量（量不到退回前 N 张）
+  for (let i = 0; i < imgs.length; i++) {
+    if (out.length >= 48) break;
+    const im = imgs[i];
+    if (byRect) {
+      let r = null; try { r = im.getBoundingClientRect(); } catch (e) {}
+      if (r && r.top > cr.bottom + 80) break; // 视口下沿外的留给懒加载
+      if (!r || r.bottom < cr.top - 80) continue; // 已滚上去的（本来就已解码）不占等待名额
+      out.push(im);
+    } else if (i < EMOJI_DECODE_AWAIT_MAX) out.push(im);
+  }
+  return out;
+}
+function emojiKickFirstScreen(imgs) {
+  const toks = [];
+  for (let i = 0; i < imgs.length; i++) {
+    const im = imgs[i];
+    let ds = ''; try { ds = (im.dataset && im.dataset.src) || ''; } catch (e) {}
+    const pay = ds || im.getAttribute('src') || '';
+    if (!pay) continue;
+    const isTok = pay.indexOf('@@m:') === 0;
+    if (ds && !im.getAttribute('src')) {
+      // 令牌也得落到 src 上池才认（池按 img[src^="@@m:"] 观察后重写真载荷）：当场补，不等 IO 回调
+      im.setAttribute('src', ds);
+      try { im.removeAttribute('data-src'); } catch (e) {}
+      try { if (emojiImgObserver) emojiImgObserver.unobserve(im); } catch (e) {}
+    }
+    if (isTok && pay.length > 4) toks.push(pay.slice(4));
+  }
+  if (toks.length && window.mochiMediaWarmTokens) { try { window.mochiMediaWarmTokens(toks); } catch (e) {} }
+}
+function emojiImgReady(im) {
+  return new Promise(function (res) {
+    let done = false;
+    const okNow = function () { try { return !!(im.complete && im.naturalWidth > 0); } catch (e) { return false; } };
+    const srcNow = function () { try { return im.getAttribute('src') || ''; } catch (e) { return ''; } };
+    const off = function () { try { im.removeEventListener('load', settle); im.removeEventListener('error', settle); } catch (e) {} };
+    const settle = function () {
+      if (done) return;
+      if (okNow()) { done = true; off(); res(true); return; }
+      if (srcNow().indexOf('@@m:') !== 0) { done = true; off(); res(false); return; } // 真失败/无源：不挡显示
+      // src 还是令牌：池解析完会重写 src 并再触发一次 load，继续等（确缺数据时占位图也会 load）
+    };
+    try { im.addEventListener('load', settle); im.addEventListener('error', settle); } catch (e) {}
+    settle();
+    setTimeout(function () { if (!done) { done = true; off(); res(okNow()); } }, 2400); // 单图上限，防个别令牌吊死
+  }).then(function () { try { return im.decode ? im.decode().catch(function () {}) : null; } catch (e) { return null; } });
+}
 function emojiShowWhenDecoded(show, token) {
   let shown = false;
   const fin = function () {
@@ -12838,28 +13260,23 @@ function emojiShowWhenDecoded(show, token) {
     try { show(); } catch (e) {}
   };
   if (!emojiList || !window.Promise) { fin(); return; }
-  const imgs = emojiList.querySelectorAll('img');
-  if (!imgs.length) { fin(); return; }
+  const first = emojiPanelFirstScreen();
+  if (!first.length) { fin(); return; }
+  emojiKickFirstScreen(first);
   const jobs = [];
-  let awaited = 0;
-  for (let i = 0; i < imgs.length; i++) {
-    const im = imgs[i];
-    if (im.dataset && im.dataset.src && !im.getAttribute('src') && i < 16) {
-      im.setAttribute('src', im.dataset.src); // #704：首屏图不等懒加载泵，立即起解码
-      im.removeAttribute('data-src');
-      try { if (emojiImgObserver) emojiImgObserver.unobserve(im); } catch (e) {}
+  for (let i = 0; i < first.length; i++) jobs.push(emojiImgReady(first[i]));
+  // 首屏外的图照旧 fire-and-forget 预热解码，不挡显示（#704 纪律不变）
+  try {
+    const all = emojiList.querySelectorAll('img');
+    for (let i = 0; i < all.length; i++) {
+      const im = all[i];
+      if (first.indexOf(im) >= 0) continue;
+      if (im.dataset && im.dataset.src && !im.getAttribute('src')) continue; // 交给懒加载泵
+      try { if (im.decode) im.decode().catch(function () {}); } catch (e) {}
     }
-    if (!im.getAttribute('src')) continue;
-    if (awaited < EMOJI_DECODE_AWAIT_MAX) {
-      awaited++;
-      try { if (im.decode) jobs.push(im.decode().catch(function () {})); } catch (e) {}
-    } else {
-      try { if (im.decode) im.decode().catch(function () {}); } catch (e) {} // #704：首屏外只预热不等待
-    }
-  }
-  if (!jobs.length) { fin(); return; }
+  } catch (e) {}
   Promise.all(jobs).then(fin, fin);
-  setTimeout(fin, 2500); // #692 兜底：decode 迟迟不结算也不把面板挂死；#716：1s→2.5s——大库机型首屏 24 张解码超 1s 时半途放行＝用户看到的「每次打开图片闪烁重载」（红米 K80 实报），上限仍在防挂死
+  setTimeout(fin, 2500); // #692 兜底：decode 迟迟不结算也不把面板挂死；#716：1s→2.5s，上限仍在防挂死
 }
 function closeEmojiPanel() {
 emojiShowToken++; // #692：作废未兑现的「解码后显示」——等图期间关掉面板不再被自动弹出
@@ -13151,6 +13568,8 @@ toast('表情包面板暂不可用');
 });
 }
 const batchImg = document.getElementById('batch-img');
+// FIX 2026-09-21 #1002：批量发送面板「插入图片」铺真·可点 input 层（owner＝统一入口的 input id）
+if (batchImg && window.mochiFilePickSurface) window.mochiFilePickSurface(batchImg, { id: 'batch-img-tap', accept: 'image/*', multiple: true, owner: 'mochi-batch-img-pick' });
 if (batchImg) {
 batchImg.addEventListener('click', (e) => {
 e.stopPropagation();
@@ -13666,6 +14085,8 @@ renderEmojiPanel();
 });
 }
 const myeAdd = document.getElementById('mye-add');
+// FIX 2026-09-21 #1002：表情面板「添加」铺真·可点 input 层（owner＝统一入口的 input id）
+if (myeAdd && window.mochiFilePickSurface) window.mochiFilePickSurface(myeAdd, { id: 'mye-add-tap', accept: 'image/*', multiple: true, owner: 'mochi-myemoji-pick' });
 if (myeAdd) {
 myeAdd.addEventListener('click', (e) => {
 e.stopPropagation();
@@ -14112,7 +14533,19 @@ document.body.appendChild(fi);
 chatImgInput = fi;
 // FIX 2026-09-18 #753：把输入框接上原生 label 激活层（必须等 input 挂进文档、id/accept 就位后）
 if (window.mochiFilePickLabel && imgBtn) window.mochiFilePickLabel(imgBtn, fi);
+// FIX 2026-09-21 #1002（第九波续）：铺「真·可点 input」层——手指物理落在真 input 上，选择器由浏览器
+// 原生默认动作弹出，不再依赖 label 转发 / JS 合成 click / showPicker 任何一条腿。owner＝上面这个
+// 常驻 input（它的 onchange 管线一字未改：多选、压缩、空 FileList 提示、发进聊天）。幂等：重复调用只补挂。
+if (window.mochiFilePickSurface && imgBtn) window.mochiFilePickSurface(imgBtn, { id: 'chat-img-tap', accept: 'image/*', multiple: true, owner: fi });
 return fi;
+}
+// #1002：输入栏若被别处整段重建，按钮是新节点、上面那层随旧节点消失 ⇒ 每次点按前经本桥幂等补挂一次
+function chatImgSurfaceEnsure() {
+try {
+var fi2 = chatImgPicker();
+var btn = document.getElementById('chat-img-btn');
+if (window.mochiFilePickSurface && btn) window.mochiFilePickSurface(btn, { id: 'chat-img-tap', accept: 'image/*', multiple: true, owner: fi2 });
+} catch (e) {}
 }
 // FIX 2026-09-18 #753：单聊输入栏可能被 #708「顶栏/底栏位置」等流程整段重建（innerHTML），
 // 重建后按钮上是新节点、label 激活层随之丢失 ⇒ 每次点按先幂等补挂一次（不再重复 insert，
@@ -14162,12 +14595,15 @@ img.src = raw;
 };
 try { reader.readAsDataURL(file); } catch (err) { settled = true; toast('图片读取失败，请换一张再试'); }
 }
+// FIX 2026-09-21 #1002：**绑定时**就铺一次（放在点按处理器里＝第一次点按永远赶不上，用户第一下仍然没反应）
+chatImgSurfaceEnsure();
 imgBtn.addEventListener('click', (e) => {
 e.stopPropagation();
 // FIX 2026-09-18 #756：原「点源自 label 就直接 return」会在国产内核（label 存在但不转发）
 // 时把 JS 兜底也一并跳过＝用户报的「点了相册点了图片完全没反应」。改为先给原生转发一个
 // 窗口期，确认确实没弹出再补 JS click（与全站入口同一口径）。
 // FIX 2026-09-20 #920：兜底腿改走全站统一三腿（showPicker→click；小米系对合成 click 静默不弹）
+chatImgSurfaceEnsure(); // #1002：点按前幂等补挂真·可点 input 层（按钮被重建过也补回来）
 var _fb = () => { window.mochiFilePickFire(chatImgPickBridge(), { onFail: () => toast('无法打开图片选择器，请重试') }); };
 if (window.mochiFilePickGuard) window.mochiFilePickGuard(chatImgPickBridge(), _fb);
 else _fb();

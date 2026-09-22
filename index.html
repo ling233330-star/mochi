@@ -86,6 +86,18 @@ box-sizing:border-box; text-align:center; padding:30px 18px 18px;
 scrollbar-width:none; -ms-overflow-style:none;
 }
 .splash-box::-webkit-scrollbar { display:none; }
+.splash-bigwarn { width:min(324px, 100%); box-sizing:border-box; margin:0 0 14px; padding:13px 15px 14px 16px; background:#fdecec; border-left:4px solid #d23430; border-radius:12px; text-align:left; animation:splash-fade-up .6s ease 0s backwards; }
+.splash-bigwarn .splash-bigwarn-t { font-size:13.5px; font-weight:800; color:#c22b27; letter-spacing:.6px; margin-bottom:7px; line-height:1.6; }
+.splash-bigwarn p { font-size:12.5px; line-height:1.8; color:#7a1d1a; font-weight:700; }
+.splash-bigwarn p + p { margin-top:7px; }
+.splash-bigwarn strong { color:#c22b27; font-weight:800; }
+.splash-mustread { width:min(324px, 100%); box-sizing:border-box; display:flex; flex-direction:column; align-items:stretch; margin:0 0 14px; }
+.splash-mustread > * { margin:0 0 14px !important; }
+.splash-mustread > *:last-child { margin-bottom:0 !important; }
+[data-theme="dark"] .splash-bigwarn { background:rgba(210,52,48,.20); border-color:#ff6b6b; }
+[data-theme="dark"] .splash-bigwarn .splash-bigwarn-t { color:#ff8f8f; }
+[data-theme="dark"] .splash-bigwarn p { color:#f0c6c6; }
+[data-theme="dark"] .splash-bigwarn strong { color:#ff8f8f; }
 .splash-brandcard {
 width:min(324px, 100%); box-sizing:border-box;
 padding:30px 22px 24px;
@@ -111,19 +123,19 @@ animation:splash-pop .7s ease .1s backwards;
 .splash-source-line.splash-clarify { white-space:normal; padding:0 14px; line-height:1.95; }
 .splash-source-url { color:var(--ink); font-weight:600; }
 .splash-stopupdate {
-margin:14px 0 0; width:100%; box-sizing:border-box;
+width:100%; box-sizing:border-box;
 padding:12px 14px 13px 15px;
-background:#fdecec; border-left:3px solid #d23430; border-radius:12px;
+background:#fff3e6; border-left:3px solid #e8590c; border-radius:12px;
 text-align:left;
 }
-.splash-stopupdate .splash-stopupdate-t { font-size:13px; font-weight:800; color:#c22b27; letter-spacing:1px; margin-bottom:6px; }
-.splash-stopupdate p { font-size:12.5px; line-height:1.8; color:#7a1d1a; font-weight:700; }
+.splash-stopupdate .splash-stopupdate-t { font-size:13px; font-weight:800; color:#c2410c; letter-spacing:1px; margin-bottom:6px; }
+.splash-stopupdate p { font-size:12.5px; line-height:1.8; color:#8a3d05; font-weight:700; }
 .splash-stopupdate p + p { margin-top:6px; }
-.splash-stopupdate strong { color:#c22b27; font-weight:800; }
-[data-theme="dark"] .splash-stopupdate { background:rgba(210,52,48,.16); border-color:#e05555; }
-[data-theme="dark"] .splash-stopupdate .splash-stopupdate-t { color:#ff8080; }
-[data-theme="dark"] .splash-stopupdate p { color:#f0c6c6; }
-[data-theme="dark"] .splash-stopupdate strong { color:#ff8080; }
+.splash-stopupdate strong { color:#c2410c; font-weight:800; }
+[data-theme="dark"] .splash-stopupdate { background:rgba(232,89,12,.16); border-color:#ff8a3d; }
+[data-theme="dark"] .splash-stopupdate .splash-stopupdate-t { color:#ffa76a; }
+[data-theme="dark"] .splash-stopupdate p { color:#f3cfa8; }
+[data-theme="dark"] .splash-stopupdate strong { color:#ffa76a; }
 .splash-abouttip {
 margin:12px 0 0; width:100%; box-sizing:border-box;
 padding:11px 14px 12px 15px;
@@ -199,16 +211,7 @@ background:#fdecec; border-left:3px solid #d23430; border-radius:12px;
 [data-theme="dark"] .splash-alert.splash-disclaimer .splash-alert-t::before { background:#ff8080; color:#3a0d0d; }
 [data-theme="dark"] .splash-alert.splash-disclaimer p { color:#f0c6c6; }
 [data-theme="dark"] .splash-alert.splash-disclaimer strong { color:#ff8080; }
-.splash-alert.splash-what { background:#e8f0fc; border-left:3px solid #3a6fc4; border-radius:12px; }
-.splash-alert.splash-what .splash-alert-t { color:#27538f; }
-.splash-alert.splash-what .splash-alert-t::before { background:#3a6fc4; }
-.splash-alert.splash-what p { color:#1e3a5f; font-size:12.5px; font-weight:700; line-height:1.8; }
-.splash-alert.splash-what strong { color:#27538f; font-weight:800; }
-[data-theme="dark"] .splash-alert.splash-what { background:rgba(58,111,196,.16); border-color:#6f9bde; }
-[data-theme="dark"] .splash-alert.splash-what .splash-alert-t { color:#a8c6f0; }
-[data-theme="dark"] .splash-alert.splash-what .splash-alert-t::before { background:#a8c6f0; color:#0e2240; }
-[data-theme="dark"] .splash-alert.splash-what p { color:#c8daf4; }
-[data-theme="dark"] .splash-alert.splash-what strong { color:#a8c6f0; }
+.splash-alert.splash-what p { font-size:12.5px; font-weight:700; line-height:1.8; }
 .splash-alert.splash-cardlock { background:#fdf3e0; border-left:3px solid #c07f1f; border-radius:12px; padding:13px 15px 14px 16px; }
 .splash-alert.splash-cardlock .splash-alert-t { color:#9a6410; }
 .splash-alert.splash-cardlock .splash-alert-t::before { background:#9a6410; }
@@ -222,6 +225,19 @@ font-size:12.5px; font-weight:800; padding:7px 14px; border-radius:8px; letter-s
 .cardlock-state { font-size:12px; font-weight:700; color:#9a6410; margin-top:8px; min-height:1em; }
 [data-theme="dark"] .splash-alert.splash-cardlock { background:rgba(192,127,31,.15); border-color:#d99a3a; }
 [data-theme="dark"] .splash-alert.splash-cardlock .splash-alert-t { color:#eebb60; }
+.splash-alert.splash-ioshome { background:#fdf3e0; border-left:3px solid #c07f1f; border-radius:12px; padding:13px 15px 14px 16px; }
+.splash-alert.splash-ioshome .splash-alert-t { color:#9a6410; font-size:13px; letter-spacing:1px; }
+.splash-alert.splash-ioshome .splash-alert-t::before { background:#9a6410; }
+.splash-alert.splash-ioshome p { color:#6b4a0e; font-size:12.5px; font-weight:700; line-height:1.8; }
+.splash-alert.splash-ioshome p + p { margin-top:6px; }
+.splash-alert.splash-ioshome strong, .splash-alert.splash-ioshome b { color:#9a6410; font-weight:800; }
+[data-theme="dark"] .splash-alert.splash-ioshome { background:rgba(192,127,31,.15); border-color:#d99a3a; }
+[data-theme="dark"] .splash-alert.splash-ioshome .splash-alert-t { color:#eebb60; }
+[data-theme="dark"] .splash-alert.splash-ioshome .splash-alert-t::before { background:#eebb60; color:#3a2504; }
+[data-theme="dark"] .splash-alert.splash-ioshome p { color:#ecd9b0; }
+[data-theme="dark"] .splash-alert.splash-ioshome strong, [data-theme="dark"] .splash-alert.splash-ioshome b { color:#eebb60; }
+input.mochi-pick-surface::file-selector-button { display:none; }
+input.mochi-pick-surface::-webkit-file-upload-button { display:none; }
 [data-theme="dark"] .splash-alert.splash-cardlock .splash-alert-t::before { background:#eebb60; color:#3a2504; }
 [data-theme="dark"] .splash-alert.splash-cardlock p { color:#ecd9b0; }
 [data-theme="dark"] .cardlock-btn { background:#d99a3a; border-color:#d99a3a; color:#3a2504; }
@@ -918,13 +934,13 @@ img.media-tok-missing { background: rgba(0,0,0,.06); min-width: 48px; min-height
 .phone { top: var(--mochi-shift-adj, 0px); }
 .splash-alert.splash-browser {
 padding:13px 15px 14px 16px;
-background:#fdecec; border-left:3px solid #d23430; border-radius:12px;
+background:#fff3e6; border-left:3px solid #e8590c; border-radius:12px;
 }
-.splash-alert.splash-browser .splash-alert-t { color:#c22b27; font-size:13px; letter-spacing:1px; }
-.splash-alert.splash-browser .splash-alert-t::before { background:#c22b27; }
-.splash-alert.splash-browser p { color:#7a1d1a; font-size:12.5px; font-weight:700; line-height:1.8; }
-.splash-alert.splash-browser strong { color:#c22b27; font-weight:800; }
-[data-theme="dark"] .splash-alert.splash-browser { background:rgba(210,52,48,.16); border-color:#e05555; box-shadow:none; }
+.splash-alert.splash-browser .splash-alert-t { color:#c2410c; font-size:13px; letter-spacing:1px; }
+.splash-alert.splash-browser .splash-alert-t::before { background:#e8590c; }
+.splash-alert.splash-browser p { color:#8a3d05; font-size:12.5px; font-weight:700; line-height:1.8; }
+.splash-alert.splash-browser strong { color:#c2410c; font-weight:800; }
+[data-theme="dark"] .splash-alert.splash-browser { background:rgba(232,89,12,.16); border-color:#ff8a3d; box-shadow:none; }
 body.mochi-bg-pause *, body.mochi-bg-pause *::before, body.mochi-bg-pause *::after { animation-play-state: paused !important; }
 :root {
 --widget-bg:#ffffff;
@@ -2173,6 +2189,7 @@ z-index:70; padding:14px 16px 14px;
 }
 .poke-card[hidden] { display:none; }
 #emoji-panel[hidden], #avlib-card[hidden] { display:flex; visibility:hidden; pointer-events:none; }
+#emoji-list img[src^="@@m:"] { opacity: 0; }
 @media (max-height:560px) {
 .poke-card { max-height:76%; }
 }
@@ -2657,7 +2674,9 @@ background:#fff; color:var(--ink); font-size:12px;
 }
 .msg-survey-opt.sel { border-color:var(--ink); font-weight:700; }
 .msg-survey-a { font-size:12px; font-weight:600; color:#3b7a4e; margin-top:4px; word-break:break-word; }
-.msg-survey-tip { font-size:11px; color:var(--muted); margin-top:8px; }
+.msg-survey-tip { font-size:11px; color:var(--muted); margin-top:8px; display:flex; align-items:center; justify-content:center; gap:3px; }
+.msg-survey-chev { font-size:13px; line-height:1; opacity:.75; transform:translateY(-.5px); }
+.msg-survey-card:active { transform:translateY(1px); box-shadow:0 1px 3px rgba(0,0,0,.05); }
 .msg-choose-card {
 max-width:78%; min-width:220px; text-align:center;
 background:#fff; border:1px solid rgba(0,0,0,.1);
@@ -2676,7 +2695,8 @@ font-size:11px; font-weight:600;
 -webkit-tap-highlight-color:transparent;
 }
 .msg-ask-card.show-fav .msg-fav-heart,
-.msg-choose-card.show-fav .msg-fav-heart {
+.msg-choose-card.show-fav .msg-fav-heart,
+.msg-survey-card.show-fav .msg-fav-heart {
 display:inline-flex; animation:favFadeIn .18s ease;
 }
 @keyframes favFadeIn { from { opacity:0; transform:translateY(2px); } to { opacity:1; transform:none; } }
@@ -2687,7 +2707,8 @@ margin-top:4px; font-size:11px; color:#999; line-height:1.4;
 display:none; -webkit-tap-highlight-color:transparent;
 }
 .msg-ask-card.show-fav .msg-fav-time,
-.msg-choose-card.show-fav .msg-fav-time {
+.msg-choose-card.show-fav .msg-fav-time,
+.msg-survey-card.show-fav .msg-fav-time {
 display:block; animation:favFadeIn .18s ease;
 }
 .msg-voice {
@@ -7868,6 +7889,14 @@ cursor:pointer; line-height:1.4; white-space:nowrap;
 .gs-row .tag:hover, .gs-row .tag:focus-visible { background:rgba(0,0,0,.06); border-color:rgba(0,0,0,.12); outline:none; }
 [data-theme="dark"] .gs-row .tag { color:#aaa; border-color:rgba(255,255,255,.14); background:rgba(255,255,255,.06); }
 [data-theme="dark"] .gs-row .tag:hover, [data-theme="dark"] .gs-row .tag:focus-visible { background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.2); }
+.set-row.plat-off .txt, .gs-row.plat-off > span { opacity:.6; }
+.plat-hint .plat-go {
+display:inline-block; margin-left:6px; padding:2px 9px; border-radius:9px; font-weight:700;
+cursor:pointer; color:#2f6fd0; background:rgba(47,111,208,.12);
+}
+[data-theme="dark"] .plat-hint .plat-go { color:#8ab4f8; background:rgba(138,180,248,.16); }
+@keyframes platFlash { 0% { background:rgba(47,111,208,.18); } 100% { background:rgba(47,111,208,0); } }
+.set-row.plat-flash, .gs-row.plat-flash { animation:platFlash 1.5s ease-out 1; }
 .gs-pick {
 flex-shrink:0; font-size:12px; font-weight:600; color:var(--ink); line-height:1.4; white-space:nowrap;
 border:1px solid rgba(0,0,0,.1); background:rgba(0,0,0,.04); border-radius:99px; padding:6px 12px;
@@ -10475,9 +10504,9 @@ font-family:inherit; padding:4px 2px; cursor:pointer; -webkit-tap-highlight-colo
     <div class="splash-footcard">
       <!-- v3.8.y：底部版本块——两行：名称+版本 / 部署时间+实时秒数（实时秒写入 #splash-ver-live） -->
       <!-- #570：第三行开屏新版检测（ver-check.js 渲染）：检测中 / ✓已是最新 / ⇩有新版本可点更新 -->
-      <div class="splash-ver" id="splash-ver" data-build-ts="1790034747766">
+      <div class="splash-ver" id="splash-ver" data-build-ts="1790036558823">
         <span class="sv-app">Mochi 字卡传讯 <b>v8.35</b></span>
-        <span class="sv-deploy">部署于 2026-09-22 07:52<span id="splash-ver-live"></span></span>
+        <span class="sv-deploy">部署于 2026-09-22 08:22<span id="splash-ver-live"></span></span>
         <span class="sv-check" id="splash-ver-check" hidden></span>
       </div>
       <!-- v3.5.120：数据（IndexedDB 回填）加载完成前不显示「点击进入」按钮，
@@ -12286,7 +12315,7 @@ font-family:inherit; padding:4px 2px; cursor:pointer; -webkit-tap-highlight-colo
       <button class="dq-primary" id="dq-drawer" type="button" style="display:flex;align-items:center;gap:10px;width:calc(100% - 24px);margin:10px 12px 0;padding:11px 14px;border:1px solid var(--card-border,#ddd);border:1px solid color-mix(in srgb, var(--btn-bg,#111) 40%, var(--card-bg,#fff));border-radius:12px;background:var(--card-bg,#fff);background:color-mix(in srgb, var(--btn-bg,#111) 10%, var(--card-bg,#fff));color:var(--btn-bg,#111);text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;flex-shrink:0">
         <span style="flex:1;min-width:0">
           <span style="display:block;font-size:15px;font-weight:700;line-height:1.25">边看边调</span>
-          <span style="display:block;font-size:11.5px;font-weight:400;opacity:.85;margin-top:2px">打开调色条：桌面在上、控件在下，改哪看哪、即时生效</span>
+          <span style="display:block;font-size:11.5px;font-weight:400;opacity:.85;margin-top:2px">打开调色条：桌面在上、控件在下，改哪看哪、即时生效；标题行可按住往上拖让位</span>
         </span>
         <span style="flex:none;font-size:12px;font-weight:700;padding:7px 10px;border:1px solid var(--btn-bg,#111);border-radius:999px;background:var(--btn-bg,#111);color:var(--btn-ink,#fff);white-space:nowrap">点击开启 ›</span>
       </button>
@@ -12612,7 +12641,7 @@ font-family:inherit; padding:4px 2px; cursor:pointer; -webkit-tap-highlight-colo
           <div class="lic-li">朋友圈贴纸回复：配图动态下点「贴纸」，选表情包贴到照片上（每张照片最多 5 张，自己贴的可点撤回），TA 会按评论概率回贴一张并进朋友圈通知</div>
           <div class="lic-li">回忆闪回：打开朋友圈时，「那年今天」的旧动态会以记忆卡置顶，点击定位到原动态并高亮，✕ 当天不再显示</div>
           <div class="lic-li">心情日记：桌面「日历」→ 顶部心情日记卡，每天选一个心情表情+一句话，TA 的心情按天生成；月视图两人心情曲线对照、心情日历格与连续记录统计（#303）</div>
-          <div class="lic-li">「TA 的提问」面板：让 TA 现在问一次（询问 / 小问题 / 好奇 / 吐槽 / 邀请）</div>
+          <div class="lic-li">「TA 的提问」面板：让 TA 现在问一次（询问 / 小问题 / 好奇 / 吐槽 / 邀请 / 贴贴 / 查岗 / 跨桌面查岗）——前五项问的是 TA 自己（提问、出选择题、好奇、吐槽、约你玩），后三项＝让 TA 当场做一件平常只按概率发生的事（发一次贴贴邀请、来查一次岗、让其他桌面的联系人来查一次岗）</div>
           <div class="lic-li">贴贴邀请：TA 会主动发来贴贴 / 抱抱 / 牵手 / 靠着的邀请，同意有轻震回应，婉拒也有专属台阶文案</div>
           <div class="lic-li">TA 的查岗：温柔关心式查岗问题卡（单选 / 文字作答 / 互动动作），作答后 TA 会回应</div>
           <div class="lic-li">批量发送消息：聊天输入栏「批量发送」按钮，可插入表情包 / 图片 / 文字，每条单独一条，多条按顺序一次性发送</div>
@@ -13689,7 +13718,7 @@ font-family:inherit; padding:4px 2px; cursor:pointer; -webkit-tap-highlight-colo
             <div class="gs-row"><span>自动弹窗概率</span><div class="stepper" data-k="ckq-popup-prob" data-min="0" data-max="100" data-step="5"><button class="stp-min">−</button><input class="stp-val" id="ckq-popup-prob-val" readonly><button class="stp-max">+</button></div></div>
             <div class="gs-row"><span>查岗冷却（分钟）</span><div class="stepper" data-k="ckq-cool" data-min="0" data-max="240" data-step="5"><button class="stp-min">−</button><input class="stp-val" id="ckq-cool-val" readonly><button class="stp-max">+</button></div></div>
           </div>
-          <div class="gs-sub" style="padding:0 14px 14px">TA 主动找你时按概率来查你的岗：聊天里出现查岗问题卡（单选点击作答、文字题输入作答），作答后 TA 会回应；概率命中时直接弹出回答弹窗。冷却内不重复查岗，需开启「主动发送」，各联系人独立保存。查岗题库可在 字卡库 →「TA的查岗」里逐条开关或自定义添加</div>
+          <div class="gs-sub" style="padding:0 14px 14px">TA 主动找你时按概率来查你的岗：聊天里出现查岗问题卡（单选点击作答、文字题输入作答），作答后 TA 会回应；概率命中时直接弹出回答弹窗。冷却内不重复查岗，需开启「主动发送」，各联系人独立保存。查岗题库可在 字卡库 →「TA的查岗」里逐条开关或自定义添加。想立刻来一次（不看概率与冷却）：聊天 →「更多功能 → TA的提问 → 查岗」</div>
         </div>
         <!-- v3.9.x：其他——联系人主动邀请（猜拳/玩游戏），随 TA 主动找你的消息按概率触发 -->
         <div class="gs-panel" data-rpanel="other" hidden>
@@ -13705,14 +13734,14 @@ font-family:inherit; padding:4px 2px; cursor:pointer; -webkit-tap-highlight-colo
             <div class="gs-row"><span>主动分享你的字卡</span><label class="toggle"><input type="checkbox" id="ai-cc-en"><span class="tk"></span></label></div>
             <div class="gs-row"><span>分享字卡概率</span><div class="stepper" data-k="ai-cc-prob" data-min="0" data-max="100" data-step="1"><button class="stp-min">−</button><input class="stp-val" id="ai-cc-prob-val" readonly><button class="stp-max">+</button></div></div>
           </div>
-          <div class="gs-sub" style="padding:0 14px 14px">TA 主动找你的消息会按概率变成猜拳/游戏/贴贴邀请（游戏在 Pong、贪吃蛇中随机；贴贴同意后 TA 会回应一句），自动打开对应半框或回应，不想玩直接关掉即可；仅在你在聊天页时触发，需开启「主动发送」。邀请话术可在 字卡库 →「TA的邀请」里逐句开关或自定义添加；「分享你的字卡」从你在 字卡库 自建的纯文本卡（含公用）里随机抽一张当 TA 的悄悄话，冷却 90 分钟</div>
+          <div class="gs-sub" style="padding:0 14px 14px">TA 主动找你的消息会按概率变成猜拳/游戏/贴贴邀请（游戏在 Pong、贪吃蛇中随机；贴贴同意后 TA 会回应一句），自动打开对应半框或回应，不想玩直接关掉即可；仅在你在聊天页时触发，需开启「主动发送」。邀请话术可在 字卡库 →「TA的邀请」里逐句开关或自定义添加；「分享你的字卡」从你在 字卡库 自建的纯文本卡（含公用）里随机抽一张当 TA 的悄悄话，冷却 90 分钟。想立刻要一次：聊天 →「更多功能 → TA的提问 → 邀请（猜拳等随机一种）/ 贴贴（一定是贴贴）」</div>
           <!-- v3.20.x：联系人跨桌面查岗 / 跨桌面来电——其他桌面的联系人按各自概率/冷却主动来查岗、来电 -->
           <div class="gs-title" style="margin-top:6px">联系人跨桌面查岗</div>
           <div class="set-group glass">
             <div class="gs-row"><span>跨桌面查岗概率</span><div class="stepper" data-k="ckq-prob" data-min="0" data-max="100" data-step="5"><button class="stp-min">−</button><input class="stp-val" id="ckq-prob-val2" readonly><button class="stp-max">+</button></div></div>
             <div class="gs-row"><span>查岗冷却（分钟）</span><div class="stepper" data-k="ckq-cool" data-min="0" data-max="240" data-step="5"><button class="stp-min">−</button><input class="stp-val" id="ckq-cool-val2" readonly><button class="stp-max">+</button></div></div>
           </div>
-          <div class="gs-sub" style="padding:0 14px 2px">其他桌面的联系人会按各自概率（默认 2%，可在此逐联系人调整）主动来查你的岗，每个触发后 30 分钟内不重复。全局开关在 设置 →「开启 联系人跨桌面查岗」，回应字卡可在 字卡库 →「联系人跨桌面查岗」里逐张开关</div>
+          <div class="gs-sub" style="padding:0 14px 2px">其他桌面的联系人会按各自概率（默认 2%，可在此逐联系人调整）主动来查你的岗，每个触发后 30 分钟内不重复。全局开关在 设置 →「开启 联系人跨桌面查岗」，回应字卡可在 字卡库 →「联系人跨桌面查岗」里逐张开关。想立刻来一次（不看概率与冷却）：聊天 →「更多功能 → TA的提问 → 跨桌面查岗」</div>
           <div class="gs-title" style="margin-top:10px">联系人跨桌面打电话</div>
           <div class="set-group glass">
             <div class="gs-row"><span>跨桌面来电概率</span><div class="stepper" data-k="desk-call-prob" data-min="0" data-max="100" data-step="5"><button class="stp-min">−</button><input class="stp-val" id="desk-call-prob-val" readonly><button class="stp-max">+</button></div></div>
@@ -14907,6 +14936,7 @@ font-family:inherit; padding:4px 2px; cursor:pointer; -webkit-tap-highlight-colo
             <button class="mail-tb mail-tb-sticker" title="表情包"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9.5l.01.01M15 9.5l.01.01"/></svg></button>
             <button class="mail-tb mail-tb-image" title="插入图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5-9 9"/></svg></button>
           </div>
+          <div style="font-size:11px;line-height:1.6;color:var(--muted);margin:6px 0 0" id="mail-write-img-hint">选不了多张或点了没反应，是浏览器 / 所在 App 的限制：换 Chrome / Edge 再试（详见 使用说明第 13 节）</div>
           <div class="mail-paper">
             <div class="mail-paper-head"><span class="mail-paper-author">我</span><span class="mail-paper-date">正在写…</span></div>
             <textarea id="mail-input" class="mail-compose-input" rows="12" placeholder="亲爱的，&#10;&#10;今天想跟你说..."></textarea>
@@ -14936,6 +14966,7 @@ font-family:inherit; padding:4px 2px; cursor:pointer; -webkit-tap-highlight-colo
             <button class="mail-tb mail-tb-sticker" title="表情包"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9.5l.01.01M15 9.5l.01.01"/></svg></button>
             <button class="mail-tb mail-tb-image" title="插入图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5-9 9"/></svg></button>
           </div>
+          <div style="font-size:11px;line-height:1.6;color:var(--muted);margin:6px 0 0" id="mail-reply-img-hint">选不了多张或点了没反应，是浏览器 / 所在 App 的限制：换 Chrome / Edge 再试（详见 使用说明第 13 节）</div>
           <div class="mail-paper">
             <div class="mail-paper-head"><span class="mail-paper-author">我的回信</span><span class="mail-paper-date">正在写…</span></div>
             <textarea id="mail-reply-input" class="mail-compose-input" rows="10" placeholder="亲爱的，&#10;&#10;今天想跟你说..."></textarea>
@@ -14966,6 +14997,7 @@ font-family:inherit; padding:4px 2px; cursor:pointer; -webkit-tap-highlight-colo
         <button class="emoji-tool" id="mye-batch">批量管理</button>
         <button class="emoji-tool" id="mye-add">添加</button>
         <button class="emoji-tool" id="mye-add-link">链接导入</button>
+        <div style="font-size:11px;line-height:1.6;color:var(--muted);flex:1 0 100%;margin:2px 0 0" id="myemoji-add-hint">选不了多张或点了没反应，是浏览器 / 所在 App 的限制：换 Chrome / Edge 再试（详见 使用说明第 13 节）</div>
       </div>
       <!-- 顶部分组切换栏（全部 / 各分组） -->
       <div class="emoji-groups" id="emoji-groups"></div>
@@ -15087,6 +15119,7 @@ font-family:inherit; padding:4px 2px; cursor:pointer; -webkit-tap-highlight-colo
             <span class="feed-preview" id="feed-preview" hidden></span>
             <!-- FIX 2026-09-18 #755：原 #feed-pick-file 静态 input（hidden）已删除，改走统一入口 -->
           </div>
+          <div style="font-size:11px;line-height:1.6;color:var(--muted);margin:6px 0 0" id="feed-pick-hint-note">选不了多张或点了没反应，是浏览器 / 所在 App 的限制：换 Chrome / Edge 再试（详见 使用说明第 13 节）</div>
           <button class="ta-add-btn" style="width:100%;margin-top:10px" id="feed-publish">发布</button>
         </div>
         <div id="feed-list"></div>
@@ -16155,6 +16188,7 @@ font-family:inherit; padding:4px 2px; cursor:pointer; -webkit-tap-highlight-colo
           </div>
           <div class="avlib-grid" id="avlib-grid"></div>
           <div class="div-result-empty" id="avlib-empty" hidden>还没有头像，点击下方按钮添加</div>
+          <div style="font-size:11px;line-height:1.6;color:var(--muted);margin:6px 0 8px" id="avlib-upload-hint">选不了多张或点了没反应，是浏览器 / 所在 App 的限制：换 Chrome / Edge 再试（详见 使用说明第 13 节）</div>
           <button class="div-draw" id="avlib-upload">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
             添加头像
@@ -16163,7 +16197,6 @@ font-family:inherit; padding:4px 2px; cursor:pointer; -webkit-tap-highlight-colo
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2"/><path d="M6 6l1 14a2 2 0 002 2h6a2 2 0 002-2l1-14"/></svg>
             清空头像池
           </button>
-          <div style="font-size:11px;line-height:1.6;color:var(--muted);margin:8px 0 0" id="avlib-upload-hint">选不了多张或点了没反应，是浏览器 / 所在 App 的限制：换 Chrome / Edge 再试（详见 使用说明第 13 节）</div>
         </div>
         <div id="avlib-pane-b" hidden>
           <div class="avlib-toggle">
@@ -16175,6 +16208,7 @@ font-family:inherit; padding:4px 2px; cursor:pointer; -webkit-tap-highlight-colo
           </div>
           <div class="avlib-grid" id="avlib-me-grid"></div>
           <div class="div-result-empty" id="avlib-me-empty" hidden>还没有头像，点击下方按钮添加</div>
+          <div style="font-size:11px;line-height:1.6;color:var(--muted);margin:6px 0 8px" id="avlib-me-upload-hint">选不了多张或点了没反应，是浏览器 / 所在 App 的限制：换 Chrome / Edge 再试（详见 使用说明第 13 节）</div>
           <button class="div-draw" id="avlib-me-upload">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
             添加我的头像
@@ -16183,7 +16217,6 @@ font-family:inherit; padding:4px 2px; cursor:pointer; -webkit-tap-highlight-colo
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2"/><path d="M6 6l1 14a2 2 0 002 2h6a2 2 0 002-2l1-14"/></svg>
             清空我的头像池
           </button>
-          <div style="font-size:11px;line-height:1.6;color:var(--muted);margin:8px 0 0" id="avlib-me-upload-hint">选不了多张或点了没反应，是浏览器 / 所在 App 的限制：换 Chrome / Edge 再试（详见 使用说明第 13 节）</div>
         </div>
         <div id="avlib-pane-c" hidden>
           <div class="avlib-toggle">
@@ -16715,6 +16748,21 @@ font-family:inherit; padding:4px 2px; cursor:pointer; -webkit-tap-highlight-colo
           <button class="more-item" id="more-invite-now" title="让TA现在邀请一次（猜拳/Pong/贪吃蛇/贴贴，话术来自字卡库「TA的邀请」）">
             <span class="mi-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="11" rx="5"/><path d="M7 10.5v3M5.5 12h3"/><path d="M15.5 11h.01M18.5 13h.01"/></svg></span>
             <span>邀请</span>
+          </button>
+          <!-- v8.29 #1003：以下三枚是「回复设置里只按概率发生」的主动行为的手动触发口（用户直派
+               「点击之后让联系人立即触发」）——贴贴邀请＝回复设置→其他「主动邀请贴贴」、
+               查岗＝回复设置→查岗「TA 主动查岗」、跨桌面查岗＝回复设置→其他「联系人跨桌面查岗」 -->
+          <button class="more-item" id="more-cuddle-now" title="让TA现在发来一次贴贴邀请（贴贴/抱抱/牵手/靠着，话术来自字卡库「TA的邀请」的贴贴分类）">
+            <span class="mi-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.2s-7.4-4.8-7.4-9.9A4.6 4.6 0 0112 7.2a4.6 4.6 0 017.4 3.1c0 5.1-7.4 9.9-7.4 9.9z"/><path d="M8.4 11.6c0-1.6 1.3-2.4 2.6-2.4"/></svg></span>
+            <span>贴贴</span>
+          </button>
+          <button class="more-item" id="more-ck-now" title="让TA现在来查一次岗（TA的查岗问题卡，题库在 字卡库 →「TA的查岗」）">
+            <span class="mi-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/><path d="M12 3a9 9 0 000 18"/></svg></span>
+            <span>查岗</span>
+          </button>
+          <button class="more-item" id="more-xck-now" title="让其他桌面的联系人现在来查一次岗（跨桌面查岗，会弹出「XX 来查岗了」）">
+            <span class="mi-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="12" height="9" rx="1.6"/><rect x="9.5" y="10.5" width="12" height="9" rx="1.6"/></svg></span>
+            <span>跨桌面查岗</span>
           </button>
         </div>
       </div>
@@ -20064,6 +20112,7 @@ try { input.addEventListener('change', onChange); } catch (e) {}
 setTimeout(function () {
 if (settled) return;
 if (window.__mochiPickArmed.opened !== openedAt) { cleanup(); settled = true; return; } // label 路径已生效
+if (window.mochiFilePickSurfaceTap && window.mochiFilePickSurfaceTap()) { cleanup(); settled = true; return; }
 cleanup();
 finish(false); // 没等到任何信号 → 判定「这次没弹出」，走兜底
 }, 60);
@@ -20080,13 +20129,82 @@ if (!label) {
 label = document.createElement('label');
 label.setAttribute(mark, input.id);
 label.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;margin:0;padding:0;border:0;opacity:0;cursor:pointer;';
-btn.appendChild(label);
+var surf = btn.querySelector('input[data-file-pick-surface]');
+if (surf) btn.insertBefore(label, surf); else btn.appendChild(label);
 }
 label.htmlFor = input.id;
 } catch (e) { /* 兼容助手绝不能成为错误源 */ }
 };
+window.mochiFilePickSurface = function (btn, opts) {
+try {
+var o = opts || {};
+if (!btn || !btn.appendChild) return null;
+var id = o.id || ('mochi-pick-surface-' + Date.now().toString(36));
+var input = document.getElementById(id);
+if (!input) {
+input = document.createElement('input');
+input.type = 'file';
+input.id = id;
+input.className = 'mochi-pick-surface';
+input.setAttribute('data-file-pick-surface', '1');
+input.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;margin:0;padding:0;border:0;outline:none;background:transparent;color:transparent;font-size:0;appearance:none;-webkit-appearance:none;cursor:pointer;z-index:0;';
+var _pos = '';
+try { _pos = getComputedStyle(btn).position || ''; } catch (e3) {}
+if (_pos !== 'absolute' && _pos !== 'fixed' && _pos !== 'relative' && _pos !== 'sticky') btn.style.position = 'relative';
+btn.appendChild(input);
+input.addEventListener('click', function () {
+window.__mochiSurfaceTapAt = Date.now();
+try {
+var bp = getComputedStyle(btn).position;
+if (bp === 'static' || bp === '') btn.style.position = 'relative';
+} catch (e4) {}
+}, true);
+input.__mochiSurface = { owner: null, onFiles: null };
+}
+try { input.accept = o.accept || 'image/*'; } catch (e) {}
+input.multiple = !!o.multiple;
+var rec = input.__mochiSurface = input.__mochiSurface || { owner: null, onFiles: null };
+if (o.owner) rec.owner = o.owner;
+if (typeof o.onFiles === 'function') rec.onFiles = o.onFiles;
+input.onchange = function () {
+var files = Array.prototype.slice.call(input.files || []);
+try { input.value = ''; } catch (e) {} // 允许重选同一文件
+if (!files.length) return;
+if (typeof rec.onFiles === 'function') { try { rec.onFiles(files); } catch (e) {} return; }
+var owner = rec.owner;
+if (typeof owner === 'string') { try { owner = document.getElementById(owner); } catch (e2) { owner = null; } }
+if (!owner) return;
+try {
+var dt = new DataTransfer();
+for (var i = 0; i < files.length; i++) dt.items.add(files[i]);
+owner.files = dt.files;
+owner.dispatchEvent(new Event('change'));
+} catch (e) {
+if (window.toast) { try { toast('浏览器不支持这种方式选择图片，请改用 Chrome 或 Edge 打开'); } catch (x) {} }
+}
+};
+return input;
+} catch (e) { return null; }
+};
+window.mochiFilePickSurfaceTap = function () {
+var at = window.__mochiSurfaceTapAt || 0;
+window.__mochiSurfaceTapAt = 0;
+return (Date.now() - at) < 400;
+};
+window.mochiFilePickSurfaceAll = function (input) {
+var out = [];
+try {
+var all = document.querySelectorAll('input[data-file-pick-surface]');
+for (var i = 0; i < all.length; i++) {
+var rec = all[i].__mochiSurface;
+if (rec && (rec.owner === input || (typeof rec.owner === 'string' && rec.owner === input.id))) out.push(all[i]);
+}
+} catch (e) {}
+return out;
+};
 window.mochiFilePickFire = function (input, opts) {
 var o = opts || {};
+if (window.mochiFilePickSurfaceTap && window.mochiFilePickSurfaceTap()) return true;
 var fired = false;
 if (input && typeof input.showPicker === 'function') {
 try { input.showPicker(); fired = true; } catch (e) {}
@@ -20115,9 +20233,19 @@ try { input.value = ''; } catch (e) {} // 允许重选同一文件
 if (o.onFiles) { try { o.onFiles(files); } catch (e) {} }
 };
 if (o.btn && window.mochiFilePickLabel) window.mochiFilePickLabel(o.btn, input);
+if (o.btn && window.mochiFilePickSurfaceAll && typeof o.onFiles === 'function') {
+try {
+var surfs = window.mochiFilePickSurfaceAll(input);
+for (var si = 0; si < surfs.length; si++) { surfs[si].__mochiSurface.onFiles = o.onFiles; }
+} catch (e) {}
+}
 var activate = function () {
 window.mochiFilePickFire(input, { onFail: function () { if (o.onError) { try { o.onError(); } catch (x) {} } } });
 };
+if (!o.noClick && window.mochiFilePickSurfaceTap && window.mochiFilePickSurfaceTap()) {
+if (window.mochiFilePickGuard) window.mochiFilePickGuard(input, function () {}); // 仍登记一次武装（诊断口径 seq 不变）
+return input;
+}
 if (!o.noClick) {
 if (o.btn && window.mochiFilePickGuard) window.mochiFilePickGuard(input, activate);
 else activate();
@@ -20994,5 +21122,4 @@ window.__mochiBootRetry = function () { try { location.reload(); } catch (e) {} 
 <!-- __MOCHI_EOF__ -->
 </body>
 </html>
-
-<!-- __MOCHI_EOF__ mubwgz1y -->
+<!-- __MOCHI_EOF__ mubxjsh3 -->

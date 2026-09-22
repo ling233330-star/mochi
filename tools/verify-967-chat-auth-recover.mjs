@@ -45,7 +45,9 @@ function A(name, cond, extra) {
 console.log('静态断言:');
 const cj = readFileSync(join(root, 'src/js/chat.js'), 'utf8');
 A('S1 权威未达标记存在', /let chatAuthPending = false;/.test(cj));
-A('S2 进度条判定并入权威未达', cj.includes('(!chatDbReady || chatRebuilding || chatAuthPending)'));
+// #1010 起进度条条件尾部新增「收尾媒体窗」chatSettleHoldOn()——断言改锚到「两个标记同处一条
+// 条件式」的语义片段（本批面与 #967 的判别力都保住，也不再被后续新增标记牵动）。
+A('S2 进度条判定并入权威未达', cj.includes('chatRebuilding || chatAuthPending'));
 A('S3 快重试耗尽转看门狗', cj.includes('if (idbRetryTimer || idbRetryCount >= IDB_RETRY_MAX) { armChatAuthWatch(); return; }'));
 A('S4 慢重试看门狗（15s 档）', /CHAT_AUTH_WATCH_MS = 15000;/.test(cj) && cj.includes('function armChatAuthWatch() {'));
 A('S5 回前台补读入口', cj.includes("document.addEventListener('mochi-fg-resume', chatResumeRearmRead);"));

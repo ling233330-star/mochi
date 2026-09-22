@@ -39,14 +39,25 @@
     const title = bar.title.replace(/\s+/g, '');
     return t.indexOf(title) > -1 && bar.marks.every(function (m) { return t.indexOf(m) > -1; });
   }
-  // 开屏置顶块（#613 起：防骗卡在 #splash-notice 第 1 张；署名禁倒卖卡仍在置顶声明区 = 防未成年锁卡之后）
+  // 开屏置顶块（#613 起：防骗卡在公告区第 1 张；署名禁倒卖卡仍在置顶声明区 = 防未成年锁卡之后）
+  // v8.29 #976：7 张必读卡整组前移到 #splash-mustread（品牌卡之前）后，本回填的
+  //   ①查找范围放宽到整个开屏滚动容器（卡片搬到哪个容器都能认领，不再写死 #splash-notice）；
+  //   ②重建插入点＝必读卡组最顶（保持「合并声明卡在必读区最顶」这条口径）；老副本没有
+  //   #splash-mustread 时回退 #splash-notice——二传副本（旧结构）照常被兜住。
+  function splashHost() {
+    return document.getElementById('splash-mustread') || document.getElementById('splash-notice');
+  }
+  function splashScope() {
+    return document.getElementById('splash-box') || document;
+  }
   function ensureBar(bar, refNode) {
-    const notice = document.getElementById('splash-notice');
-    if (!notice) return null;
-    let box = notice.querySelector('.splash-alert[data-anti-scam="' + bar.tag + '"]');
+    const host = splashHost();
+    if (!host) return null;
+    const scope = splashScope();
+    let box = scope.querySelector('.splash-alert[data-anti-scam="' + bar.tag + '"]');
     if (!box) {
       // 兼容旧副本/标记被删：按官方标题文本认领已有置顶块
-      const heads = notice.querySelectorAll('.splash-alert .splash-alert-t');
+      const heads = scope.querySelectorAll('.splash-alert .splash-alert-t');
       for (let i = 0; i < heads.length; i++) {
         if (heads[i].textContent.trim() === bar.title) { box = heads[i].parentNode; break; }
       }
@@ -54,7 +65,7 @@
     if (!box) {
       box = document.createElement('div');
       box.className = 'splash-alert';
-      notice.insertBefore(box, refNode || notice.firstChild);
+      host.insertBefore(box, refNode || host.firstChild);
     }
     box.setAttribute('data-anti-scam', bar.tag);
     if (!marked(box, bar)) { // 缺失或被改 → 重建/改写回官方文案
@@ -86,9 +97,10 @@
   // 用途：临时插播场景（如发现倒卖，对所有联网副本含二传远程挂横幅）；notice.json 不带 bulletin 字段 = 完全不显示，零开销。
   let bulletin = null;
   function ensureBulletin() {
-    const notice = document.getElementById('splash-notice');
-    if (!notice) return;
-    let box = notice.querySelector('.splash-alert[data-anti-scam="3"]');
+    const host = splashHost(); // #976：与置顶声明卡同一宿主（必读卡组，回退公告卡）
+    if (!host) return;
+    const scope = splashScope();
+    let box = scope.querySelector('.splash-alert[data-anti-scam="3"]');
     const active = !!(bulletin && typeof bulletin.text === 'string' && bulletin.text.trim()
       && (!bulletin.until || Date.now() < bulletin.until));
     if (!active) { if (box) box.remove(); return; }
@@ -96,8 +108,8 @@
     if (!box) {
       box = document.createElement('div');
       box.className = 'splash-alert';
-      const b1 = notice.querySelector('.splash-alert[data-anti-scam="1"]');
-      notice.insertBefore(box, b1 ? b1.nextSibling : notice.firstChild);
+      const b1 = scope.querySelector('.splash-alert[data-anti-scam="1"]');
+      host.insertBefore(box, b1 ? b1.nextSibling : host.firstChild);
     }
     box.setAttribute('data-anti-scam', '3');
     if (box.textContent !== '公告' + want) { // 内容变化 → 重写（标题固定「公告」）
@@ -117,6 +129,8 @@
   // ===== #319 防未成年人·系统内置字卡锁：开屏锁卡状态渲染 + 解锁/上锁交互 =====
   // 闸门本体在 card-lock.js（jsFiles 靠前加载）；这里只管开屏这张卡的 UI。
   // 解锁成功：提示后自动刷新页面，让回复池/字卡库/词典拼字按解锁态重建。
+  // #998 锁定态 tip 的密码口径：答案在第一页公告的章节里（第一页顶部「目录」可逐章翻），并写明不是第二页
+  //   「进入前 · 作者必读公告」上的两个日期（用户直派「时间就在开屏第一页的某个目录，不要看第二页」）。
   function setupCardLockCard() {
     const card = document.getElementById('splash-cardlock');
     if (!card || !window.cardLockOpen) return;
@@ -126,7 +140,7 @@
     const open = window.cardLockOpen();
     if (tip) tip.textContent = open
       ? '系统内置字卡已解锁（成年人验证已通过）。如需恢复未成年人保护，可重新上锁。'
-      : '系统内置字卡已全部锁定，这是面向未成年人的保护措施，不是 bug。锁定影响：默认聊天字卡、词典（含词典拼字）、其他系统预设互动字卡全部停用；你自建的字卡与情绪 / 心意 / 意图字卡不受影响。豁免说明（#499）：聊天情绪字卡、TA 的心情、聊天回应字卡这三大互动链不受锁定影响，未解锁也照常触发与抽取。所以若发现「某功能开关都开了却没效果」，先看是不是锁定中。不输密码也能正常使用全部功能，密码只管两件事：解锁系统内置字卡、跳过开屏的 2 个问答。注意：锁定时若自定义字卡（含 mj 字卡）一张都没添加，回复会更单薄（情绪/回应字卡仍在，但少了系统预设内容），自己在自定义字卡里添加几张即可。密码一共 6 位数字：前两位是 99，后 4 位是 mochi 字卡生日的字面数字（把生日日期原样写成 4 位数），生日写在开屏公告的目录里——注意不是开屏最底下的部署时间，部署时间只是用来判断是否更新到了新版本。解开密码请勿二传（不要告诉别人），一旦有人二传，密码就会被重新设置。';
+      : '系统内置字卡已全部锁定，这是面向未成年人的保护措施，不是 bug。锁定影响：默认聊天字卡、词典（含词典拼字）、其他系统预设互动字卡全部停用；你自建的字卡与情绪 / 心意 / 意图字卡不受影响。豁免说明（#499）：聊天情绪字卡、TA 的心情、聊天回应字卡这三大互动链不受锁定影响，未解锁也照常触发与抽取。所以若发现「某功能开关都开了却没效果」，先看是不是锁定中。不输密码也能正常使用全部功能，密码只管两件事：解锁系统内置字卡、跳过开屏的 2 个问答。注意：锁定时若自定义字卡（含 mj 字卡）一张都没添加，回复会更单薄（情绪/回应字卡仍在，但少了系统预设内容），自己在自定义字卡里添加几张即可。密码一共 6 位数字：前两位是 99，后 4 位是 mochi 字卡生日的字面数字（把生日日期原样写成 4 位数），生日写在开屏第一页的章节目录里（点开第一页顶部的「目录」逐章翻一下就能找到）——不是第二页「进入前 · 作者必读公告」上那两个日期，也不是开屏最底下的部署时间（那只是用来判断有没有更新到新版本）。这个密码与开屏问答页的「暗号」是同一个。解开密码请勿二传（不要告诉别人），一旦有人二传，密码就会被重新设置。';
     actions.innerHTML = '';
     const state = document.createElement('div');
     state.className = 'cardlock-state';
@@ -160,6 +174,7 @@
   // 两处重复）。okState 可选：解锁成功时写入「验证通过」提示文本的元素（开屏锁卡用，页面随后
   // 自动刷新）。开屏仍在（splash 未隐藏）时为避免 z-index 盖住 modal，给 splash 挂 .under-modal，
   // mask [hidden] 恢复时移除；进入后开屏已隐藏则整段跳过。
+  // #998 解锁弹窗 staticText 同口径（第一页章节指路＋不是第二页日期）。
   // #812：staticText 末尾补「与开屏问答页暗号同码」互指说明——两入口同码（card-lock 校验
   // mochi#990815 散列、applock QA_SKIP_CODE='990815'），此前两边只讲公式互不通气＝用户各自猜码。
   function promptCardUnlock(okState) {
@@ -220,13 +235,14 @@
         tryReload();
         if (!window.cardLockConfirmPersisted) setTimeout(function () { location.reload(); }, 900);
       }
-    }, { inputmode: 'numeric', placeholder: '输入二级验证密码', staticText: '密码一共 6 位数字：前两位是 99，后 4 位是 mochi 字卡生日的字面数字（把生日日期原样写成 4 位数），生日写在开屏公告的目录里——注意不是开屏最底下的部署时间，部署时间只是用来判断是否更新到了新版本。解开密码请勿二传（不要告诉别人），一旦有人二传，密码就会被重新设置。这个密码与开屏问答页的「暗号」是同一个（同一串 6 位数字）：在开屏问答页点「输暗号跳过问答」用的也是它。' });
+    }, { inputmode: 'numeric', placeholder: '输入二级验证密码', staticText: '密码一共 6 位数字：前两位是 99，后 4 位是 mochi 字卡生日的字面数字（把生日日期原样写成 4 位数），生日就在开屏第一页的章节目录里（点开顶部的「目录」逐章翻一下就能找到）——不是第二页「进入前 · 作者必读公告」上那两个日期，也不是开屏最底下的部署时间（那只是用来判断有没有更新到新版本）。解开密码请勿二传（不要告诉别人），一旦有人二传，密码就会被重新设置。这个密码与开屏问答页的「暗号」是同一个（同一串 6 位数字）：在开屏问答页点「输暗号跳过问答」用的也是它。' });
   }
   // #XXX 强制弹窗提醒：进入应用后系统内置字卡仍锁定（未输二级密码）时，每次打开应用弹一次
   // （本加载仅一次）。可点「知道了」关闭继续用（不输密码也能正常使用全部功能），也可就地
   // 「输入密码解锁」——进入应用后开屏锁卡已不可见，此处为应用内唯一解锁入口，删除则锁定用户
   // 进入后无法再解锁、只能重进开屏。文案与开屏锁卡 tip / 字卡库锁提示同义。
-  const CARD_LOCK_REMIND = '系统字卡未解锁，请自行添加字卡使用。联系人无法使用字卡，不是bug，是系统字卡锁了。\n其实从内测开始就说明过需要自行添加字卡使用，系统内置字卡只是附带功能。\n\n系统内置字卡已全部锁定，这是面向未成年人的保护措施，不是 bug。锁定影响：默认聊天字卡、词典（含词典拼字）、其他系统预设互动字卡全部停用；你自建的字卡与情绪 / 心意 / 意图字卡不受影响。豁免说明（#499）：聊天情绪字卡、TA 的心情、聊天回应字卡这三大互动链不受锁定影响，未解锁也照常触发与抽取。所以若发现「某功能开关都开了却没效果」，先看是不是锁定中。不输密码也能正常使用全部功能，密码只管两件事：解锁系统内置字卡、跳过开屏的 2 个问答。注意：锁定时若自定义字卡（含 mj 字卡）一张都没添加，回复会更单薄（情绪/回应字卡仍在，但少了系统预设内容），自己在自定义字卡里添加几张即可。密码一共 6 位数字：前两位是 99，后 4 位是 mochi 字卡生日的字面数字（把生日日期原样写成 4 位数），生日写在开屏公告的目录里——注意不是开屏最底下的部署时间，部署时间只是用来判断是否更新到了新版本。解开密码请勿二传（不要告诉别人），一旦有人二传，密码就会被重新设置。';
+  // #998 进入后提醒弹窗：用户已在应用内，口径改为「回开屏第一页的章节里找」＋不是第二页日期。
+  const CARD_LOCK_REMIND = '系统字卡未解锁，请自行添加字卡使用。联系人无法使用字卡，不是bug，是系统字卡锁了。\n其实从内测开始就说明过需要自行添加字卡使用，系统内置字卡只是附带功能。\n\n系统内置字卡已全部锁定，这是面向未成年人的保护措施，不是 bug。锁定影响：默认聊天字卡、词典（含词典拼字）、其他系统预设互动字卡全部停用；你自建的字卡与情绪 / 心意 / 意图字卡不受影响。豁免说明（#499）：聊天情绪字卡、TA 的心情、聊天回应字卡这三大互动链不受锁定影响，未解锁也照常触发与抽取。所以若发现「某功能开关都开了却没效果」，先看是不是锁定中。不输密码也能正常使用全部功能，密码只管两件事：解锁系统内置字卡、跳过开屏的 2 个问答。注意：锁定时若自定义字卡（含 mj 字卡）一张都没添加，回复会更单薄（情绪/回应字卡仍在，但少了系统预设内容），自己在自定义字卡里添加几张即可。密码一共 6 位数字：前两位是 99，后 4 位是 mochi 字卡生日的字面数字（把生日日期原样写成 4 位数），要回开屏第一页的章节里找（第一页顶部有「目录」，点开逐章翻一下就能找到）——不是第二页「进入前 · 作者必读公告」上那两个日期，也不是开屏最底下的部署时间（那只是用来判断有没有更新到新版本）。这个密码与开屏问答页的「暗号」是同一个。解开密码请勿二传（不要告诉别人），一旦有人二传，密码就会被重新设置。';
   let cardRemindShown = false;
   // 次数口径：自定义字卡总数（含日 0）=当前桌面专属库 + 公用库里用户自建的全部字卡（不含系统
   // 预设/词典），见 chatcard.js cardLockCustomCount。数据就绪前 ownPoolRaw 可能读不到字卡库

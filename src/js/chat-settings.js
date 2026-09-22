@@ -750,6 +750,11 @@
     upBtn.textContent = '＋ 上传新图（可多选）';
     upBtn.style.cssText = 'width:100%;padding:11px;border:none;border-radius:10px;background:var(--ink,#111);color:var(--bg-b,#fff);font-size:14px;font-weight:600;margin-bottom:8px';
     upBtn.addEventListener('click', () => { try { csBgPickFiles(); } catch (e) { toast('无法打开相册，请重试'); } });
+    // FIX 2026-09-21 #1002（第九波续）：聊天壁纸「上传新图」铺「真·可点 input」层——手指物理落在真 input 上，
+    // 选择器由浏览器原生默认动作弹出，不再依赖 label 转发 / JS 合成 click / showPicker 任何一条腿。
+    // owner 写统一入口那个 input 的 id（点按时才建），选完文件转交它并派发 change ⇒ 逐张入库/面板刷新管线一字未改。
+    // 面板每次打开都是新节点，故本处按渲染即铺（幂等，重复调用只补挂）。
+    if (window.mochiFilePickSurface) window.mochiFilePickSurface(upBtn, { id: 'cs-bg-up-tap', accept: 'image/*', multiple: true, owner: 'dev-cs-bg-pick' });
     box.appendChild(upBtn);
     if (cur) {
       const rmBtn = document.createElement('button');
@@ -1061,9 +1066,9 @@
   // 见 device.js mochiFilePickLabel（小米浏览器对 JS 合成 click 静默不弹选择器，#717 后小米17 Pro 实报）。
   headInput.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:1;margin:0;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;';
   document.body.appendChild(headInput);
-  headInput.onchange = () => {
-    const f = headInput.files && headInput.files[0];
-    headInput.value = ''; // 允许重选同一文件
+  // v8.29 #991（第九波）：选图后的处理抽成公共函数——sr-only input（老路径）与铺在两行头像上的
+  // 真 input（surface，新路径）共用同一条压缩/武装回调管线，两条来源不会各自走偏。
+  function headPickFile(f) {
     if (!f) return;
     const cb = headCb; headCb = null;
     const reader = new FileReader();
@@ -1074,6 +1079,11 @@
       });
     };
     reader.readAsDataURL(f);
+  }
+  headInput.onchange = () => {
+    const f = headInput.files && headInput.files[0];
+    headInput.value = ''; // 允许重选同一文件
+    headPickFile(f);
   };
   // FIX 2026-09-19 #813（iPhone 16 Pro + Safari 实报「头像上传无反应，一直是默认头像」，用户明说
   // 其他设备型号也有）：**武装回调与激活选择器必须拆成两步，且武装在前**。原实现把
@@ -1173,6 +1183,16 @@
   const csAp = row('cs-avatar-partner');
   if (csAp) {
     if (window.mochiFilePickLabel) window.mochiFilePickLabel(csAp, headInput);
+    // FIX 2026-09-21 #991（第九波）：在这一行上铺一层真·可点 file input——手指物理落在 input 上，
+    // 浏览器按原生默认动作弹相册，不再依赖 label 转发 / JS 合成 click / showPicker 任何一条腿。
+    // 点击仍会冒泡到本行的 click 处理器（先 armHead 武装回调，再由 guard 探测到 surface 点按而让路，
+    // 不会在两个 input 上各弹一次）。压缩/回显管线（headPickFile → store.set → applyProfile）原样复用。
+    if (window.mochiFilePickSurface) {
+      window.mochiFilePickSurface(csAp, {
+        id: 'cs-avatar-partner-tap', accept: 'image/*',
+        onFiles: (files) => { headPickFile(files && files[0]); }
+      });
+    }
     csAp.addEventListener('click', () => {
       // FIX 2026-09-19 #813：先武装回调、再激活（原 _fb 内才 arm＝label 转发成功的内核永远拿不到回调）
       armHead((data) => {
@@ -1194,6 +1214,13 @@
   const csAu = row('cs-avatar-user');
   if (csAu) {
     if (window.mochiFilePickLabel) window.mochiFilePickLabel(csAu, headInput);
+    // FIX 2026-09-21 #991（第九波）：同 csAp——本行铺「真·可点 input」surface 层
+    if (window.mochiFilePickSurface) {
+      window.mochiFilePickSurface(csAu, {
+        id: 'cs-avatar-user-tap', accept: 'image/*',
+        onFiles: (files) => { headPickFile(files && files[0]); }
+      });
+    }
     csAu.addEventListener('click', () => {
       // FIX 2026-09-19 #813：同 csAp——先武装再激活
       armHead((data) => {
@@ -3322,7 +3349,7 @@
     // 观感与桌面抽屉逐字同款：贴底、40vh 上限、半透明底（不透明会把聊天页挡死，
     // #562 用户原话「又不是半透明的页面，还是会遮挡其他东西我看不见」）；刻意不加
     // backdrop-filter——AGENTS.md 的 iOS 卡顿红线。
-    d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:95;max-height:40vh;background:var(--card-bg,#fff);background:color-mix(in srgb, var(--card-bg,#fff) 72%, transparent);color:var(--ink,#111);box-shadow:0 -6px 24px rgba(0,0,0,.18);border-radius:16px 16px 0 0;overflow-y:auto;overflow-x:hidden;padding:0 12px calc(10px + var(--mochi-safe-bottom,env(safe-area-inset-bottom,0px)));box-sizing:border-box;display:flex;flex-direction:column;gap:8px';
+    d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:95;max-height:40vh;transition:bottom .16s ease;background:var(--card-bg,#fff);background:color-mix(in srgb, var(--card-bg,#fff) 72%, transparent);color:var(--ink,#111);box-shadow:0 -6px 24px rgba(0,0,0,.18);border-radius:16px 16px 0 0;overflow-y:auto;overflow-x:hidden;padding:0 12px calc(10px + var(--mochi-safe-bottom,env(safe-area-inset-bottom,0px)));box-sizing:border-box;display:flex;flex-direction:column;gap:8px';
     d.innerHTML = '';
     // #783：读回抽屉自身层级作为让位后的回正值（cssText 是唯一事实源，这里不复制数字）
     const csBaseZ = parseInt(getComputedStyle(d).zIndex, 10);
@@ -3342,7 +3369,13 @@
     hd.style.cssText = 'display:flex;align-items:center;gap:8px;flex:none';
     const hdTxt = document.createElement('span');
     hdTxt.textContent = '边看边调（即时生效）';
-    hdTxt.style.cssText = 'font-size:13px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    hdTxt.style.cssText = 'font-size:13px;font-weight:700;flex:none';
+    // v8.29 #1008（用户直派「托标题行可上移移动功能位置，也需要写清楚，用户并不知道有这个功能」）：
+    // 拖动是 #760 就实现了的，但界面上一个字都没提——这里把提示固定挂在标题行里（点「收起」
+    // 折叠正文区后仍然看得见），并同步进设置页「功能说明」。
+    const hdHint = document.createElement('span');
+    hdHint.textContent = '按住标题行上下拖 · 让开看聊天';
+    hdHint.style.cssText = 'font-size:11px;color:var(--muted,#888);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
     // #760：grip 小横条与标题行可竖向拖动（此前 grip 是纯装饰）。用 pointer 事件 +
     // setPointerCapture：桌面版 #660 的教训——不夺回控制权触摸序列会被内核抢成滚动，
     // 表现为「抖一下拖不动」。header 里的按钮不参与拖动（pointerdown 让行，否则点不动）。
@@ -3353,6 +3386,7 @@
         if (e.target.closest('button')) return;
         if (e.pointerType === 'mouse' && e.button !== 0) return;
         drag = true; sy = e.clientY; sb = csBeautyDockBot || 0;
+        d.style.transition = 'none'; // #1008：拖动期间关掉 bottom 过渡，保证跟手
         try { el.setPointerCapture(e.pointerId); } catch (er) {}
         e.preventDefault();
       });
@@ -3365,6 +3399,7 @@
       const up = () => {
         if (!drag) return;
         drag = false;
+        d.style.transition = 'bottom .16s ease'; // #1008：松手恢复过渡（吸附回贴底也是动画）
         if ((csBeautyDockBot || 0) < 24) csBeautyDockBot = null; // 接近底部＝吸附回贴底
         csDrawerApplyBottom();
       };
@@ -3383,7 +3418,7 @@
       foldBtn.textContent = willFold ? '展开' : '收起';
     });
     const closeBtn = mkMini('\u2715', () => { csDrawerClose(); }, ';padding:6px 10px');
-    hd.appendChild(hdTxt); hd.appendChild(foldBtn); hd.appendChild(closeBtn);
+    hd.appendChild(hdTxt); hd.appendChild(hdHint); hd.appendChild(foldBtn); hd.appendChild(closeBtn);
     d.appendChild(hd);
     bindDockDrag(hd); // grip 只有 4px 高，标题行才是主拖拽把手
     const chipsRow = document.createElement('div');
@@ -3542,6 +3577,13 @@
       b.addEventListener('click', fn);
       return b;
     };
+    // FIX 2026-09-21 #1002：抽屉里的「上传」按钮＝mkAct + 铺一层真·可点 file input（本文件新增上传入口
+    // 一律走它：按钮是单用途的、点击处理留在原处，surface 只负责「让手指点到真 input」）。
+    const mkActSurface = (label, fn, surfOpts) => {
+      const b = mkAct(label, fn);
+      try { if (window.mochiFilePickSurface) window.mochiFilePickSurface(b, surfOpts || {}); } catch (e) {}
+      return b;
+    };
     const DEF = themeDefaults();
     const setSurface = (i, v) => { try { store.set(CHAT_SURFACE_SETTINGS[i].key, String(v)); } catch (e) {} applySettings(); };
     const SECS = [
@@ -3603,9 +3645,9 @@
           const glN = (function () { try { return csBgList().length; } catch (e) { return 0; } })();
           // 两枚按钮走抽屉现成的两列网格（mkAct 不认 flex，裸 flex 行会按内容宽＝一长一短）
           wrap.appendChild(mkGrid([
-            mkAct(store.get('cs-bg') ? '上传壁纸（可多选）' : '① 上传壁纸（可多选）', () => {
+            mkActSurface('上传壁纸（可多选）', () => {
               try { csBgPickFiles(); } catch (e) { toast('无法打开相册，请重试'); }
-            }),
+            }, { id: 'cs-bg-drawer-tap', accept: 'image/*', multiple: true, owner: 'dev-cs-bg-pick' }),
             mkAct('图库 · 换一张' + (glN ? '（' + glN + '）' : ''), () => {
               try { csBgOpenGallery(); } catch (e) { toast('图库打不开，请重试'); }
             })
@@ -3800,14 +3842,23 @@
         return wrap;
       } }
     ];
-    const renderSec = (key) => {
-      csDrawerSec = key;
+    const paintCsChips = (key) => {
       Array.prototype.forEach.call(chipsRow.children, c => {
         const on = c.dataset.sec === key;
-        c.style.background = on ? 'var(--ink,#111)' : 'var(--btn-cancel-bg,#fafafa)';
-        c.style.color = on ? 'var(--bg-b,#fff)' : 'var(--ink,#111)';
-        c.style.borderColor = on ? 'var(--ink,#111)' : 'var(--card-border,#ddd)';
+        const bg = on ? 'var(--ink,#111)' : 'var(--btn-cancel-bg,#fafafa)';
+        if (c.style.background !== bg) c.style.background = bg;
+        const fg = on ? 'var(--bg-b,#fff)' : 'var(--ink,#111)';
+        if (c.style.color !== fg) c.style.color = fg;
+        const bd = on ? 'var(--ink,#111)' : 'var(--card-border,#ddd)';
+        if (c.style.borderColor !== bd) c.style.borderColor = bd;
       });
+    };
+    const renderSec = (key) => {
+      // v8.29 #1008：点亮态只在真变化时写（口径同 #938：先比对，相等就别写）——原实现每次
+      // renderSec 都无条件写 3×N 个 style（实测重复点同一分区白写 24~30 次）。重建控件区的
+      // 行为刻意保留：点当前分区胶囊＝重画本区视图是既有刷新链路（verify-badge-tune D3 依赖）。
+      csDrawerSec = key;
+      paintCsChips(key);
       body.innerHTML = '';
       paletteHost = null;
       colorItems = [];
@@ -3860,7 +3911,7 @@
     b.style.cssText = 'display:flex;align-items:center;gap:10px;width:calc(100% - 24px);margin:10px 12px 0;padding:11px 14px;border:1px solid var(--card-border,#ddd);border:1px solid color-mix(in srgb, var(--btn-bg,#111) 40%, var(--card-bg,#fff));border-radius:12px;background:var(--card-bg,#fff);background:color-mix(in srgb, var(--btn-bg,#111) 10%, var(--card-bg,#fff));color:var(--btn-bg,#111);text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;flex-shrink:0';
     b.innerHTML = '<span style="flex:1;min-width:0">' +
       '<span style="display:block;font-size:15px;font-weight:700;line-height:1.25">边看边调</span>' +
-      '<span style="display:block;font-size:11.5px;font-weight:400;opacity:.85;margin-top:2px">打开调色条：聊天在上、控件在下，改哪看哪、即时生效</span>' +
+      '<span style="display:block;font-size:11.5px;font-weight:400;opacity:.85;margin-top:2px">打开调色条：聊天在上、控件在下，改哪看哪、即时生效；标题行可按住往上拖让位</span>' +
       '</span><span style="flex:none;font-size:12px;font-weight:700;padding:7px 10px;border:1px solid var(--btn-bg,#111);border-radius:999px;background:var(--btn-bg,#111);color:var(--btn-ink,#fff);white-space:nowrap">点击开启 ›</span>';
     b.addEventListener('click', openChatBeautyDrawer);
     const first = sec.querySelector('.gs-title');

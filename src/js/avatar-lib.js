@@ -268,9 +268,9 @@
     syncVal();
   }
   // 页签切换：TA 的池 / 我的池（点页签直接切换，两级状态不变）
-  function switchAvTab(me) { avOwner = me ? 1 : 0; syncAvPane(); }
+  function switchAvTab(me) { avOwner = me ? 1 : 0; syncAvPane(); try { avKickFirstScreen(avGrid); avKickFirstScreen(avMeGrid); } catch (e) {} }
   // 大类切换：头像 / 昵称
-  function switchAvKind(name) { avKind = name ? 'name' : 'avatar'; syncAvPane(); }
+  function switchAvKind(name) { avKind = name ? 'name' : 'avatar'; syncAvPane(); try { avKickFirstScreen(avGrid); avKickFirstScreen(avMeGrid); } catch (e) {} }
   // v3.42.x 头像互动图片懒加载——与表情面板/字卡库同一机制（data-src + IntersectionObserver）：
   // 头像池多张全尺寸图一次全量解码 = 中端机型主线程卡死、头像显示不出（跨机型报障同族）。
   // 只给进入视口的图补 src；无 IntersectionObserver 的浏览器回退即时补 src（行为不变）。
@@ -542,6 +542,62 @@
     avShowWhenDecoded(function () { avPage.hidden = false; }, myToken);
   }
   let avShowToken = 0; // #692：头像互动半框「解码后再显示」世代令牌（关闭/重开作废，防空回调弹出）
+  // FIX 2026-09-22 #1011 头像互动半框「打开就闪一下重新加载」残留根因（表情面板同族、同一条机制）：
+  //   #716 的等待只对「此刻已经有 src 的图」await decode()，而首开这一拍图只有 data-src
+  //   （懒加载的 src 要等 IntersectionObserver 回调，回调要到下一帧才回来）⇒ jobs 为空、等待当场
+  //   放行，半框先显示、图随后才一张张落地＝用户看到的闪一下再重新加载。判据改成「首屏每张图都
+  //   拿到载荷且解码完成」：首屏当场补 src（不等 IO 回调）、未就绪的等自己的 load，兜底 2.5s 不变。
+  //   零机型分支、零视觉改动。
+  const AV_DECODE_AWAIT_MAX = 24; // #716 首屏口径（#1011 起提到模块作用域：首屏判定函数也要用）
+  function avFirstScreen(grid) {
+    const out = [];
+    if (!grid) return out;
+    let imgs; try { imgs = grid.querySelectorAll('img'); } catch (e) { return out; }
+    if (!imgs || !imgs.length) return out;
+    let cr = null; try { cr = (avPage || grid).getBoundingClientRect(); } catch (e) {}
+    const byRect = !!(cr && cr.height > 4); // 没量到几何（非活动 pane 等）时退回前 N 张旧口径
+    for (let i = 0; i < imgs.length; i++) {
+      if (out.length >= AV_DECODE_AWAIT_MAX) break;
+      const im = imgs[i];
+      if (byRect) {
+        let r = null; try { r = im.getBoundingClientRect(); } catch (e) {}
+        if (r && r.top > cr.bottom + 80) break; // 半框下沿外的留给懒加载
+        if (!r || r.bottom < cr.top - 80) continue; // 已滚上去/非活动 pane（无几何）不占等待名额
+        out.push(im);
+      } else out.push(im);
+    }
+    return out;
+  }
+  function avKickFirstScreen(grid) {
+    const imgs = avFirstScreen(grid);
+    for (let i = 0; i < imgs.length; i++) {
+      const im = imgs[i];
+      let ds = ''; try { ds = (im.dataset && im.dataset.src) || ''; } catch (e) {}
+      if (ds && !im.getAttribute('src')) {
+        im.setAttribute('src', ds); // 当场补：不等 IO 回调（令牌载荷同路径，池会按 src 重写真载荷）
+        try { im.removeAttribute('data-src'); } catch (e) {}
+        try { if (avImgObserver) avImgObserver.unobserve(im); } catch (e) {}
+      }
+    }
+    return imgs;
+  }
+  function avImgReady(im) {
+    return new Promise(function (res) {
+      let done = false;
+      const okNow = function () { try { return !!(im.complete && im.naturalWidth > 0); } catch (e) { return false; } };
+      const srcNow = function () { try { return im.getAttribute('src') || ''; } catch (e) { return ''; } };
+      const off = function () { try { im.removeEventListener('load', settle); im.removeEventListener('error', settle); } catch (e) {} };
+      const settle = function () {
+        if (done) return;
+        if (okNow()) { done = true; off(); res(true); return; }
+        if (srcNow().indexOf('@@m:') !== 0) { done = true; off(); res(false); return; } // 真失败/无源：不挡显示
+        // 令牌未解析：池重写 src 后会再触发 load，继续等
+      };
+      try { im.addEventListener('load', settle); im.addEventListener('error', settle); } catch (e) {}
+      settle();
+      setTimeout(function () { if (!done) { done = true; off(); res(okNow()); } }, 2400);
+    }).then(function () { try { return im.decode ? im.decode().catch(function () {}) : null; } catch (e) { return null; } });
+  }
   // #662：把头像库网格里已赋 src 的图 decode 完再执行 show（openAvlib 用）
   function avShowWhenDecoded(show, token) {
     let shown = false;
@@ -555,22 +611,17 @@
     // 大头像库在低内存机型隐藏期位图被回收，总解码超兜底＝半途放行、首屏逐格冒出＝用户看到的
     // 「换头像打开页面图片闪烁重载」（#704 表情面板同族收口，红米 K80 实报）。前 24 张
     // （≈半框首屏两三行）await 后即显示；其余 fire-and-forget 预热不挡显示。
-    const AV_DECODE_AWAIT_MAX = 24;
     const grids = [avGrid, avMeGrid];
     const jobs = [];
-    let awaited = 0;
     for (let g = 0; g < grids.length; g++) {
       const grid = grids[g];
       if (!grid) continue;
+      const first = avKickFirstScreen(grid); // #1011：先把首屏载荷补进 src（不等 IO 回调）
+      for (let i = 0; i < first.length; i++) jobs.push(avImgReady(first[i]));
       const imgs = grid.querySelectorAll('img[src]');
       for (let i = 0; i < imgs.length; i++) {
-        const im = imgs[i];
-        if (awaited < AV_DECODE_AWAIT_MAX) {
-          awaited++;
-          try { if (im.decode) jobs.push(im.decode().catch(function () {})); } catch (e) {}
-        } else {
-          try { if (im.decode) im.decode().catch(function () {}); } catch (e) {} // #716：首屏外只预热不等待
-        }
+        if (first.indexOf(imgs[i]) >= 0) continue;
+        try { if (imgs[i].decode) imgs[i].decode().catch(function () {}); } catch (e) {} // #716：首屏外只预热不等待
       }
     }
     if (!jobs.length) { fin(); return; }
@@ -725,6 +776,13 @@
     // FIX 2026-09-18 #738：原生 label 激活兜底——小米 MiuiBrowser 等对 JS 合成 click() 仍静默
     // 不弹选择器（#717 修复后小米17 Pro 实报）；透明 label 铺满按钮、内核原生转发激活 input
     if (window.mochiFilePickLabel) window.mochiFilePickLabel(btn, input);
+    // FIX 2026-09-21 #1002（第九波续）：本按钮同时铺「真·可点 input」层——手指物理落在 input 上，
+    // 选择器由浏览器原生默认动作弹出，不再依赖 label 转发 / JS 合成 click / showPicker 任何一条腿。
+    // owner 指向本按钮自己的池选择器：surface 选完文件后转交它并派发 change，上面的压缩/落库管线
+    // （listFn/saveFn/rerender/多张计数提示）一字未改照常跑。
+    if (window.mochiFilePickSurface) {
+      window.mochiFilePickSurface(btn, { id: input.id + '-tap', accept: 'image/*', multiple: true, owner: input });
+    }
     btn.addEventListener('click', (e) => {
       // FIX 2026-09-18 #756：原 `if (fromLabel(e)) return;` 在「label 存在但国产内核不转发」
       // 时连 JS 兜底一并跳过＝用户报的「点了一点反应都没有」；改由 guard 事后确认真没弹出再补

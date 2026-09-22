@@ -184,6 +184,11 @@ await ev(`(function(){
     });
   };
   // 解钉（拖动 dy=30 ≥ 10＝真实滑动意图，不走轻点回钉）：touchstart 解钉、touchend 不写
+  // 2026-09-21 #998 备注（断言语义未动，仅记录装置适用边界）：本装置**不带位移**，拖动前后视口都停在
+  // 真底部——#998 起这种「停在真底部 + 静止 + 解钉」会被看门狗按 #378 既定语义（用户自己滚回贴底＝
+  // 恢复自动跟底）合法回钉，故读类必须与拖动同一次 evaluate（见 ensureUnpinned），且中间不要插入真实
+  // 位移（实测：给拖动补位移会让回钉提前到 __sim 的活动窗里、落定写被「活动中丢弃」吃掉，B3 在纯
+  // HEAD 上也变红＝装置自身的坑，与本产品改动无关）。
   window.__unpinDrag=function(){
     var r=b.getBoundingClientRect(); var y=Math.round(r.top+r.height*0.6);
     var t1=new Touch({identifier:1,target:b,clientX:200,clientY:y});
@@ -204,11 +209,14 @@ await ev(`(function(){
 const gapOf = `(function(){var b=document.getElementById('chat-body');var max=b.scrollHeight-b.clientHeight;return JSON.stringify({gap:Math.round((max-b.scrollTop)*10)/10, max:Math.round(max), stick:window.__stickExtra});})()`;
 const reset = async (extra) => { await ev('window.__wlog.length=0;window.__slog.length=0;' + (extra !== undefined ? 'window.__stickExtra=' + extra + ';' : '') + 'true'); };
 // 解钉前置（重试式）：unpinChatAndAnchor 给 chat-body 挂 scroll-anchor-auto（#316）——类不在＝这次
-// 合成拖动没生效（偶发丢失），重试；多次仍不在＝环境问题，由调用处断言报出，别让断言空转成假绿
+// 合成拖动没生效（偶发丢失），重试；多次仍不在＝环境问题，由调用处断言报出，别让断言空转成假绿。
+// 2026-09-21 #998：拖动与读类合并到**同一次 evaluate**——合成拖动是同步的、类由 touchstart 同步挂上，
+// 而分两次 evaluate 会夹进几十 ms 的 CDP 往返，窗口里产品的合法回钉（#378：停在真底部 + 静止 ⇒ 恢复
+// 自动跟底，由看门狗周期复核执行）可能已经把类摘掉，使本前置变成与看门狗赛跑（实测 3 跑 1 红）。
 const ensureUnpinned = async () => {
   for (let i = 0; i < 5; i++) {
-    if (await ev("document.getElementById('chat-body').classList.contains('scroll-anchor-auto')")) return true;
-    await ev('window.__unpinDrag()');
+    const ok = await ev("(function(){ window.__unpinDrag(); return document.getElementById('chat-body').classList.contains('scroll-anchor-auto'); })()");
+    if (ok) return true;
     await sleep(120);
   }
   return false;

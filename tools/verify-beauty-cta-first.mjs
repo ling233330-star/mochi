@@ -151,14 +151,20 @@ const mB = await ev(`(function(){
   var d=document.getElementById('beauty-drawer');
   if(!d) return JSON.stringify({miss:'no-drawer'});
   var r=d.getBoundingClientRect();
+  var tb=document.querySelector('.tabbar');
+  var tr=tb && !tb.hidden ? tb.getBoundingClientRect() : null;
   return JSON.stringify({ shown:getComputedStyle(d).display!=='none', h:Math.round(r.height),
-    bottomPinned: Math.abs(r.bottom - window.innerHeight) <= 2,
+    // v8.29 #992：口径由「贴底 bottom:0」改为「停在底部导航之上」（同 #962 屏幕适配面板）——
+    // 贴底时抽屉 z-index:95 压住 z-index:2 的底部导航，开着它根本切不了页。这里改判
+    // 「抽屉底边不越过底部导航顶边」＝导航仍可点，同时仍守高度 ≤40vh（不盖掉大半个桌面）。
+    tabbarTop: tr ? Math.round(tr.top) : null,
+    clearsNav: tr ? r.bottom <= tr.top + 2 : Math.abs(r.bottom - window.innerHeight) <= 2,
     pctOfVh: Math.round(r.height/window.innerHeight*100),
     title: /边看边调/.test(d.textContent||'') });
 })()`);
 const oB = JSON.parse(String(mB));
 chk('B1 点入口打开边看边调抽屉', oB.shown === true, mB);
-chk('B2 抽屉仍是贴底、高度 ≤ 40vh（不盖掉大半个桌面）', oB.bottomPinned === true && oB.pctOfVh <= 40, mB);
+chk('B2 抽屉不压底部导航（#992 新口径）且高度 ≤ 40vh（不盖掉大半个桌面）', oB.clearsNav === true && oB.pctOfVh <= 40, mB);
 chk('B3 抽屉标题仍是「边看边调」', oB.title === true, mB);
 chk('B4 全程零未捕获异常', (await ev("JSON.stringify(window.__jsErrors||[])")).length <= 2, await ev("JSON.stringify((window.__jsErrors||[]).slice(-3))"));
 

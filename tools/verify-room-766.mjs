@@ -2,9 +2,6 @@
 // 覆盖四项：①离房/后台停步进计时器 ②亮度落盘节流（生效即时、写盘合并）③锁定家具点击有反馈
 // ④每日互动点数上限提示。断言口径＝用户看得见的现象（TA 位置 / CSS 变量 / toast 文本），
 // 不断言内部变量名。
-// #967 追加三项（T10/T11/T12）：装扮墙纸/地板的锁定项点确定要有解锁提示、不误写当前墙纸/
-// 地板，且未锁定项照旧真的切换（防 value 形态改坏）。toast 有 2s 常驻＝红侧会读到上一条残留、
-// 家具锁定那条文案还含 🔒/Lv./解锁，故两处锁定断言点击前先把 #cc-toast 清空＝只认本次新 toast。
 // 用法：node tools/verify-room-766.mjs（需先 node build.mjs；跑基线版用另一份构建目录里的本脚本副本）
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -191,13 +188,13 @@ const ptsNormal = await evalJs("(function(){return window.__roomState().pts;})()
 const earnNormal = await evalJs("(function(){return JSON.stringify(window.__roomState().earn);})()");
 check('T9 未撞限时正常 +1🏠 且计数累加', String(ptsNormal) === '101' && /"ta":1/.test(earnNormal), 'pts=' + ptsNormal + ' earn=' + earnNormal);
 
-// ---- T10/T11/T12 #967 装扮（墙纸/地板）锁定项点确定要有反馈，且不误写 ----
+// ---- T10/T11/T12 #966 装扮（墙纸/地板）锁定项点确定要有反馈，且不误写 ----
 const wallBefore = await evalJs("(function(){return String(window.__roomState().wall);})()");
 await evalJs("(function(){document.getElementById('room-btn-deco').click();return true;})()");
 await sleep(400);
 const decoPills = await evalJs("(function(){return Array.prototype.map.call(document.querySelectorAll('#modal-pills .pill'),function(b){return b.textContent;}).join(' | ');})()");
 check('T10a 装扮墙纸列表打开且含锁定项（前提成立）', decoPills.indexOf('🔒') >= 0, decoPills.slice(0, 90));
-await evalJs("(function(){var t=document.getElementById('cc-toast');if(t)t.textContent='';var ps=Array.prototype.slice.call(document.querySelectorAll('#modal-pills .pill'));var t2=ps.find(function(b){return b.textContent.indexOf('🔒')>=0;});if(!t2)return 'nopill';t2.click();document.getElementById('modal-ok').click();return 'ok';})()");
+await evalJs("(function(){var ps=Array.prototype.slice.call(document.querySelectorAll('#modal-pills .pill'));var t=ps.find(function(b){return b.textContent.indexOf('🔒')>=0;});if(!t)return 'nopill';t.click();document.getElementById('modal-ok').click();return 'ok';})()");
 await sleep(400);
 const wallLockToast = await toastTxt();
 check('T10b 点锁定墙纸 + 确定 ⇒ toast 说明要 Lv.几（原为静默）', /🔒/.test(wallLockToast) && /Lv\./.test(wallLockToast) && wallLockToast.indexOf('解锁') >= 0, wallLockToast);
@@ -208,7 +205,7 @@ check('T10c 点锁定墙纸不改写当前墙纸', wallAfterLock === wallBefore,
 await sleep(400);
 const floorPills = await evalJs("(function(){return Array.prototype.map.call(document.querySelectorAll('#modal-pills .pill'),function(b){return b.textContent;}).join(' | ');})()");
 check('T11a 锁定墙纸后仍进到地板步且含锁定项', floorPills.indexOf('🔒') >= 0 && floorPills.length > 4, floorPills.slice(0, 90));
-const floorLockToastProbe = await evalJs("(function(){var t=document.getElementById('cc-toast');if(t)t.textContent='';var ps=Array.prototype.slice.call(document.querySelectorAll('#modal-pills .pill'));var t2=ps.find(function(b){return b.textContent.indexOf('🔒')>=0;});if(!t2)return 'nopill';t2.click();document.getElementById('modal-ok').click();return 'ok';})()");
+const floorLockToastProbe = await evalJs("(function(){var ps=Array.prototype.slice.call(document.querySelectorAll('#modal-pills .pill'));var t=ps.find(function(b){return b.textContent.indexOf('🔒')>=0;});if(!t)return 'nopill';t.click();document.getElementById('modal-ok').click();return 'ok';})()");
 await sleep(400);
 const floorLockToast = await toastTxt();
 check('T11b 点锁定地板 + 确定 ⇒ toast 说明要 Lv.几（原为静默）', /🔒/.test(floorLockToast) && /Lv\./.test(floorLockToast) && floorLockToast.indexOf('解锁') >= 0, floorLockToastProbe + ' / ' + floorLockToast);

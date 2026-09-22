@@ -1729,7 +1729,7 @@ marketPage.innerHTML =
 '<div class="market-body">' +
 '<div class="market-hero">' +
 '<div class="market-hero-title">心意市集</div>' +
-'<div class="market-hero-sub">挑一份心意，跨越两个世界送给你</div>' +
+'<div class="market-hero-sub">挑一份心意，跨越两个世界送给 TA</div>' +
 '<div class="market-balance" id="market-balance"></div>' +
 '</div>' +
 '<div class="market-mine" id="market-mine"></div>' +

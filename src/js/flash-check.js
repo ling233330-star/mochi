@@ -48,6 +48,7 @@
   // _jankTotal/_worst＝掉帧累计与最慢 3 帧现场（_frames 有 6000 截断，长窗口必须另记计数器）
   var _winMs = 0, _winT0 = 0, _winTimer = null, _acts = [], _actHandler = null, _actEvs = [];
   var _jankTotal = 0, _worst = [];
+  var _winSnap = null, _visReset = false, _visHandler = null;
 
   function now() { try { return performance.now(); } catch (e) { return Date.now(); } }
   // 版本号：#about-ver-val 是构建时替换的真值（window.APP_VERSION 未必赋值，见 card-audit.js 同款注释）
@@ -58,7 +59,10 @@
 
   function mark(kind, name) { if (_on) _ev.push({ t: now(), k: kind, n: name || '' }); }
   // :root / #page-chat 的 style 真被改（带时刻入表；归哪一次点击由 collect() 判定，落不进窗口的算局外改写）
-  function flip(where) { if (_on) _flips.push({ t: now(), w: where }); }
+  // #1015b：「无操作翻动」在翻动当刻就判死，不留到结算时反推——_acts 只保留最近 400 条，窗口里滑一
+  // 下滑屏就能产生几百个 scroll/pointermove，结算时 msSinceAct 找不到更早的活动记录会返回 Infinity，
+  // 于是「明明有操作」的翻动被算成无操作，把闪屏嫌疑凭空算给应用（同一次翻动还会随窗口推进改判）。
+  function flip(where) { if (_on) { var ft = now(); _flips.push({ t: ft, w: where, idle: msSinceAct(ft) >= WIN_ACT_MS }); } }
   var _other = 0;
 
   // —— 内联变量写入钩子：按元素挂钩（documentElement.style 上 mobile-adapt 已有实例级包装，
@@ -148,14 +152,19 @@
     document.addEventListener('click', _onClick, true);
     // #1015：长窗口要判「无操作翻动」，就必须知道「用户最近一次动手」是什么时候。点击已有锚点，
     // 再补按键/输入/触摸/滚动——打字、切页、上滑也会触发样式改写，缺了这几样会把它们冤成「自己闪」。
-    _actEvs = ['click', 'pointerdown', 'touchstart', 'keydown', 'input', 'scroll'];
+    _actEvs = ['click', 'pointerdown', 'touchstart', 'keydown', 'input', 'scroll', 'pointermove', 'touchmove', 'wheel'];
     _actHandler = function () { if (_on) { _acts.push(now()); if (_acts.length > 400) _acts.splice(0, 200); } };
     for (var av = 0; av < _actEvs.length; av++) { try { document.addEventListener(_actEvs[av], _actHandler, { capture: true, passive: true }); } catch (e) {} }
+    // #1015b：切后台/锁屏期间 rAF 不跑，回前台第一帧的间隔会是「离开的整段时间」（手机上切走 30 秒
+    // ＝一帧 30000ms）＝假掉帧，还会永久占住「最慢的帧」前三。可见性一变就把帧基准重开、跳过那一帧。
+    _visHandler = function () { _visReset = true; };
+    try { document.addEventListener('visibilitychange', _visHandler, true); } catch (e) {}
     (function frames() {
       var last = now();
       requestAnimationFrame(function tick() {
         if (!_on) return;
         var t = now();
+        if (_visReset) { _visReset = false; last = t; requestAnimationFrame(tick); return; }
         var gap = t - last;
         _frames.push({ t: t, gap: gap });
         // #1015：掉帧累计走计数器（_frames 有 6000 截断，长窗口按数组数会漏），
@@ -216,7 +225,13 @@
     }
     return out;
   }
+  // #1015b：长窗口统计要么现算、要么用快照。【结束】之后 _flips/_ev 已清空，若还现算就会印出
+  // 「翻动 0 次／白写 0 条＋掉帧 N 帧（_jankTotal 没清）」并下结论「窗口内连一次改写都没有＝探针没生效」。
   function winStats() {
+    if (_winSnap) return _winSnap;
+    return winCompute();
+  }
+  function winCompute() {
     if (!_winMs) return null;
     var t0 = _winT0, t1 = t0 + _winMs, i;
     var flips = 0, fr = 0, fc = 0, fg = 0, waste = 0;
@@ -231,7 +246,7 @@
     var idle = [];
     for (i = 0; i < _flips.length; i++) {
       var fl = _flips[i]; if (fl.t < t0) continue; if (fl.t > t1) break;
-      if (msSinceAct(fl.t) >= WIN_ACT_MS) idle.push(fl);
+      if (fl.idle) idle.push(fl);
     }
     var cl = clusterFlips(idle);
     return { ms: _winMs, flips: flips, flipRoot: fr, flipChat: fc, flipGc: fg, waste: waste, jank: _jankTotal,
@@ -327,7 +342,9 @@
     b2.textContent = '结束';
     b2.style.cssText = 'border:1px solid rgba(255,255,255,.5);border-radius:12px;padding:4px 10px;background:transparent;color:#fff;font-size:12px;flex:none';
     b1.addEventListener('click', function () { showReport(); });
-    b2.addEventListener('click', function () { stop(); });
+    // #1015b：长窗口轮点【结束】应当直接出报告——用户复现完闪屏就会点它，旧版只把浮条摘掉、
+    // 一个数字都不给（要看结果得先知道还有【看结果】这一手）。
+    b2.addEventListener('click', function () { if (_winMs) finishWin(); else stop(); });
     d.appendChild(txt); d.appendChild(b1); d.appendChild(b2);
     document.body.appendChild(d);
     _chip = d;
@@ -358,7 +375,10 @@
       else if (!_seenIn) lines.push('没有采到「抽屉里」的点击：这段时间共采到 ' + _seen + ' 次屏幕点击，但都不在 边看边调 的底部抽屉里。请确认点的是「聊天设置/群聊设置 → 美化 → 边看边调」打开的那条底部抽屉里的档位按钮（抽屉里可点的档位＝宽松/标准/紧凑这类胶囊）。');
       else lines.push('没有采到抽屉里的点击：请点【开始】后到 聊天设置/群聊设置 → 美化 → 边看边调 点档位（第 2 下重复点同一个档）。');
     }
-    for (var i = 0; i < ops.length; i++) lines.push(opLine(ops[i], i));
+    // #1015b：长窗口轮不逐条列「操作 N」——长窗口里点档位只是正常使用的一部分，且帧数组有 6000 截断，
+    // 早于截断的点击会印出「帧 0 个｜最慢帧 0ms」（读起来像「没掉帧」，其实是没数据）。点档位的数据
+    // 一并并进下面的长窗口累计。
+    if (!win) for (var i = 0; i < ops.length; i++) lines.push(opLine(ops[i], i));
     var noopOps = ops.filter(function (o) { return !o.writes; });
     var wasteAll = 0, jankAll = 0, worst = 0, flipAll = 0;
     for (var k = 0; k < noopOps.length; k++) {
@@ -386,7 +406,7 @@
         lines.push('· 无操作翻动 ' + win.idle + ' 次：那一下的前 ' + (WIN_ACT_MS / 1000) + ' 秒里没有任何点击/按键/输入/滚动＝最可疑的「自己闪」（也可能是某个模块的定时刷新，按下面对照）：');
         for (var ci = 0; ci < win.clusters.length; ci++) lines.push('   ' + (ci + 1) + '. 第 ' + Math.round((win.clusters[ci].t - _winT0) / 1000) + ' 秒 · ' + win.clusters[ci].pg + ' · 连着翻动 ' + win.clusters[ci].n + ' 次');
       } else {
-        lines.push('· 无操作翻动 0 次：窗口内每一次全站样式改写都发生在你操作之后的 ' + (WIN_ACT_MS / 1000) + ' 秒内＝没有「自己闪」的证据');
+        lines.push('· 无操作翻动 0 次：窗口内每一次全站样式改写都发生在你操作之后的 ' + (WIN_ACT_MS / 1000) + ' 秒内＝没有「自己闪」的证据（注：新消息自动跟底这类「本网页自己触发的滚动」也会记成有操作，所以「0 次」不等于绝对没有自闪）');
       }
       if (win.worst.length) lines.push('· 最慢的帧：' + win.worst.map(function (x) { return '第 ' + x.off + ' 秒 ' + x.pg + ' ' + x.ms + 'ms'; }).join('｜'));
       var wc = '';
@@ -437,9 +457,11 @@
     }
     _styleHooks.length = 0;
     if (_origRemove) { try { DOMTokenList.prototype.remove = _origRemove; } catch (e) {} _origRemove = null; }
-    // #1015：长窗口的逐秒倒计时与用户活动监听一并摘掉（零残留口径不变；_winMs/_winT0 留着，
-    // 好让【结束】之后 report() 还能拿到这一轮的长窗口段）
+    // #1015b：长窗口的逐秒倒计时与用户活动监听一并摘掉（零残留口径不变）。_winMs/_winT0 留着，
+    // 但统计先冻结成快照——数组马上要被清空，不冻结的话【结束】之后 report() 会拿到自相矛盾的数字。
+    if (_winMs && !_winSnap) { try { _winSnap = winCompute(); } catch (e) {} }
     if (_winTimer) { clearTimeout(_winTimer); _winTimer = null; }
+    if (_visHandler) { try { document.removeEventListener('visibilitychange', _visHandler, true); } catch (e) {} _visHandler = null; }
     if (_actHandler) {
       for (var ak = 0; ak < _actEvs.length; ak++) { try { document.removeEventListener(_actEvs[ak], _actHandler, true); } catch (e) {} }
       _actHandler = null;
@@ -454,7 +476,7 @@
     if (_on || !window.openModal) return false;
     _on = true; _other = 0; _seen = 0; _seenIn = 0;
     _clicks = []; _ev = []; _flips = []; _frames = [];
-    _winMs = 0; _winT0 = 0; _acts = []; _jankTotal = 0; _worst = [];
+    _winMs = 0; _winT0 = 0; _acts = []; _jankTotal = 0; _worst = []; _winSnap = null; _visReset = false;
     if (_winTimer) { clearTimeout(_winTimer); _winTimer = null; }
     arm();
     chip();

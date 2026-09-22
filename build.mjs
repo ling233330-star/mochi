@@ -4357,18 +4357,18 @@ const FIX_SENTINELS = [
   { name: "#1014i 模板：权限状态标红行锚点", file: "template.html", needle: "id=\"bg-notify-perm-warn\"" },
   /* ==== 2026-09-22 #1015 三个自测的「测试时间太短」收口（用户直派「电量消耗自测 闪屏自测 发烫自测，功能测试时间太短，并且还能怎么优化」）：①发烫自测时长从写死的 10 秒放开到 10 秒~5 分钟档（UI 默认 3 分钟）＋负载切片（60ms 一片、片间让出主线程——旧实现每轮同步阻塞 700ms，时长一拉到分钟级页面就变「无响应」）＋判级改看整窗趋势（6 段中位 + 首尾 10% 中位）＋不可见即暂停＋可提前结束；②电量自测默认档 30 分钟→1 小时、短窗口结论标明「属粗测」、5~15 分钟的段也标粗测；③闪屏自测加长窗口「边用边测」（1/3/5 分钟，默认 1 分钟）＝全程累计翻动/白写/掉帧并单独挑出「无操作翻动」的时刻。验证 tools/verify-energy-check.mjs / tools/verify-flash-check.mjs。 ==== */
   { name: '#1015a 发烫时长档位（删＝又回到写死的 10 秒：除「此刻有没有被限速」以外一律测不出，用户报的「测试时间太短」复发）', file: 'js/energy-check.js', needle: "var HEAT_DURS = { '10': 10000, '60': 60000, '180': 180000, '300': 300000 };" },
-  { name: '#1015b 发烫负载切片逐片计时（删＝回到整段同步阻塞，时长一拉长主线程就冻死）', file: 'js/energy-check.js', needle: 'rep.slices.push(performance.now() - t);' },
+  { name: '#1015b 发烫负载切片逐片计时（删＝回到整段同步阻塞，时长一拉长主线程就冻死）', file: 'js/energy-check.js', needle: 'rep.slices.push(dur);' },
   { name: '#1015c 发烫切片让出主线程（删＝主线程被负载独占，进度浮条不刷新、帧采样全废）', file: 'js/energy-check.js', needle: 'setTimeout(slice, 0);' },
   { name: '#1015d 发烫判级看整窗趋势（删＝又只剩开头 3 轮 vs 最后 3 轮两个点，中途回升/平台期看不见）', file: 'js/energy-check.js', needle: 'var bins = binMeds(r, HEAT_BINS);' },
   { name: '#1015e 发烫负载期页面不可见＝暂停（删＝后台烧电，且被内核节流的定时器会把负载时钟拉成假完成）', file: 'js/energy-check.js', needle: 'if (hidAt) { rep.pauseMs += performance.now() - hidAt; hidAt = 0; actAt = performance.now(); }' },
   { name: '#1015f 发烫提前结束出口（删＝3 分钟档点下去出不来，用户只能干等或杀页面）', file: 'js/energy-check.js', needle: 'if (_heatStop) { rep.stopped = 1; return finish(); }' },
   { name: '#1015g 发烫档位弹窗接上（删＝档位胶囊与引擎脱钩，选几分钟都按默认跑）', file: 'js/energy-check.js', needle: 'pills: HEAT_PILLS,' },
   { name: '#1015h 电量默认档 1 小时（改回 30 分钟＝默认值本身给不出可用数字，工具自己的报告就写着「1 小时以上才有参考价值」）', file: 'js/energy-check.js', needle: "var ms = BAT_DURS[String(v)] || BAT_DURS['60'];" },
-  { name: '#1015i 电量短窗口结论标明粗测（删＝15 分钟档的数字被当成结论）', file: 'js/energy-check.js', needle: "+ (totalMs < BAT_REF_MS ? '· 窗口不足 1 小时，属粗测' : ''));" },
+  { name: '#1015i 电量短窗口结论标明粗测（删＝15 分钟档的数字被当成结论）', file: 'js/energy-check.js', needle: "+ (winMs < BAT_REF_MS ? '· 窗口不足 1 小时，属粗测' : ''));" },
   { name: '#1015j 电量 5~15 分钟的段也标粗测（删＝6 分钟的段与 1 小时的段长得一模一样）', file: 'js/energy-check.js', needle: "var tier = ms < SEG_MIN_MS ? '不足 5 分钟' : (ms < SEG_COARSE_MS ? '不足 15 分钟' : '');" },
   { name: '#1015k 闪屏长窗口档位（删＝闪屏自测又只剩「点 4 下」那 4×0.7 秒，「用一会儿才闪」的现场永远不在场）', file: 'js/flash-check.js', needle: "var WIN_DURS = { '0': 0, '60': 60000, '180': 180000, '300': 300000 };" },
-  { name: '#1015l 无操作翻动判据（删＝长窗口数不出「没有任何操作却自己翻动」的时刻，最可疑的闪源失去口径）', file: 'js/flash-check.js', needle: 'if (msSinceAct(fl.t) >= WIN_ACT_MS) idle.push(fl);' },
-  { name: '#1015m 用户活动锚（删＝打字/切页/上滑触发的样式改写被冤成「自己闪」）', file: 'js/flash-check.js', needle: "_actEvs = ['click', 'pointerdown', 'touchstart', 'keydown', 'input', 'scroll'];" },
+  { name: '#1015l 无操作翻动判据（删＝长窗口数不出「没有任何操作却自己翻动」的时刻，最可疑的闪源失去口径）', file: 'js/flash-check.js', needle: 'if (fl.idle) idle.push(fl);' },
+  { name: '#1015m 用户活动锚（删＝打字/切页/上滑触发的样式改写被冤成「自己闪」）', file: 'js/flash-check.js', needle: "_actEvs = ['click', 'pointerdown', 'touchstart', 'keydown', 'input', 'scroll', 'pointermove', 'touchmove', 'wheel'];" },
   { name: '#1015n 长窗口到点自动出报告（删＝时间到了不出报告，用户不知道还得去点浮条）', file: 'js/flash-check.js', needle: "if (left <= 0) { chipSay('时间到，正在出报告…'); finishWin(); return; }" },
   { name: '#1015o 长窗口掉帧累计与最慢帧现场（删＝按 6000 截断的帧数组统计＝长窗口掉帧数严重偏低）', file: 'js/flash-check.js', needle: '_worst.push({ off: Math.round((t - _winT0) / 1000), pg: pageName(), ms: Math.round(gap) });' },
   { name: '#1015p 三行自测文案写明时长与默认档（删＝工具里只写「约 10 秒」，用户不知道有长档，本批口径回退）', file: 'index.html', needle: '10 秒~5 分钟测发烫降频（默认 3 分钟，可中途结束）' },
@@ -4614,7 +4614,16 @@ const FIX_SENTINELS = [
   { name: '#1006l 存钱罐「回一句给TA」走用户发送侧（改回 chatAddIn＝用户的话又落在 TA 气泡）', file: 'js/p2-features.js', needle: "if (t && window.chatSendMsg) { try { window.chatSendMsg(t); } catch (e) {} toast('已回复'); }" },
   { name: '#1006m 吃什么「问 TA」走用户发送侧（改回 chatAddIn＝变成 TA 问用户）', file: 'js/p2-features.js', needle: 'if (window.chatSendMsg) { try { window.chatSendMsg(msg); }' },
   { name: '#1006n 摸鱼小结信 TA 口吻（改回「你俩…（我 +x · 名字 +y）」＝TA 把自己算在外、把用户标成「我」）', file: 'js/mail.js', needle: "'你和我一共摸鱼 ' + totalFish + ' 点（你 +' + fm + ' · 我 +' + ft + '）。'" },
-  { name: '#1006o 市集标语送给 TA（改回「送给你」＝收礼人写成用户）', file: 'js/gift-shop.js', needle: '挑一份心意，跨越两个世界送给 TA' }
+  { name: '#1006o 市集标语送给 TA（改回「送给你」＝收礼人写成用户）', file: 'js/gift-shop.js', needle: '挑一份心意，跨越两个世界送给 TA' },
+  /* ==== 2026-09-22 #1015b 第二轮：四路并行审计后收口（含本批自己引入的 5 处会污染报告数字的缺陷）——①电量：判级门槛收到 15 分钟（5~15 分钟的段不再能一边被标「粗测、仅供参考」一边驱动「结论：异常」）、窗口后缀改按用户选的档位判（不再被 gapMs 骗成「满 1 小时」）、补 unkD 守卫、心跳平均间隔只摊页面活着的时间、到点判定补进 visibilitychange 路径、<500ms 切出切回不再把一整段记到错段；②发烫：校准前热身（冷态 workN 偏小、每片短于设计值）、负载时钟只算真在算的时间、收尾结算后台暂停段、静置期不可见则顺延重开（不再印 0fps）、末段明显更快时点名「判级不可靠」、文案不再承诺「60ms 一片 / 界面全程可用」；③闪屏：无操作翻动改为翻动当刻判定（不再被 _acts 淘汰骗成 Infinity）、活动锚补拖拽/滚轮、可见性变化重开帧基准（不再把后台整段记成一帧 30000ms）、[结束] 冻结长窗口快照并直接出报告、长窗口轮不再逐条印「帧 0 个」的操作行、「0 次无操作翻动」补边界说明。 ==== */
+  { name: '#1015q 电量判级门槛与粗测门槛对齐（改回 SEG_MIN_MS＝5 分钟的段又能一边标「粗测、仅供参考」一边驱动「结论：异常」＋关保活的建议）', file: 'js/energy-check.js', needle: "if (run.fgMs >= SEG_COARSE_MS) cands.push({ n: '前台使用', r: rFg, b: bandOf(rFg, FG_WARN, FG_BAD) });" },
+  { name: '#1015r 电量窗口后缀按用户选的档位（改回 totalMs＝含 gapMs，页面被关掉 50 分钟也照样算满 1 小时，粗测提示正好在最薄的数据上消失）', file: 'js/energy-check.js', needle: 'var winMs = run.ms || totalMs;' },
+  { name: '#1015s 发烫负载时钟只算真在算的时间（改回 actMs += now - actAt＝把片间 setTimeout 往返也算成负载，3 分钟档只压约 2.7 分钟）', file: 'js/energy-check.js', needle: 'actMs += dur;' },
+  { name: '#1015t 发烫收尾结算后台暂停段（删＝静置期/收尾期正处后台的暂停时长被整块丢掉，报告只字不提）', file: 'js/energy-check.js', needle: 'if (hidAt) { rep.pauseMs += performance.now() - hidAt; hidAt = 0; }' },
+  { name: '#1015u 发烫静置窗与已采帧一起重开（删＝静置期页面不可见时报告印「负载前静置约 0fps」，而整份前后对照就架在这个基准上）', file: 'js/energy-check.js', needle: 'rep.idleMs = performance.now() - idleAt;' },
+  { name: '#1015v 闪屏无操作翻动在翻动当刻判死（改回结算时用 msSinceAct 反推＝窗口里滑一下就把早先有操作的翻动算成无操作，凭空给应用加嫌疑）', file: 'js/flash-check.js', needle: '_flips.push({ t: ft, w: where, idle: msSinceAct(ft) >= WIN_ACT_MS });' },
+  { name: '#1015w 闪屏可见性变化重开帧基准（删＝切后台/锁屏回来后第一帧的间隔是「离开的整段时间」，假掉帧并永久占住「最慢的帧」前三）', file: 'js/flash-check.js', needle: 'if (_visReset) { _visReset = false; last = t; requestAnimationFrame(tick); return; }' },
+  { name: '#1015x 闪屏[结束]冻结长窗口快照（删＝stop() 清空 _flips/_ev 后 report() 印「翻动 0 次＋掉帧 N 帧」并下结论「探针没生效」）', file: 'js/flash-check.js', needle: 'if (_winMs && !_winSnap) { try { _winSnap = winCompute(); } catch (e) {} }' }
 ];
 try {
   const built = CHECK_SENTINELS ? '' : readFileSync(join(root, 'index.html'), 'utf8');

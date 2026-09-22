@@ -246,7 +246,10 @@
     try { ch = !!bm.charging; } catch (e) {}
     var now = Date.now();
     var dt = now - run.last;
-    if (dt < 500) return; // 定时器与 visibilitychange 撞上时的重复采样，跳过
+    // #1015b：撞上重复采样时也要把此刻状态记下来。旧实现连 lastSt 一起跳过 ⇒「切出去 <500ms 又
+    // 切回来」的可见事件被吞掉，接下来一整个间隔（含掉电量）都记到后台段上（实测：真正后台 265ms，
+    // 报告记了 1311ms），后台速率被拉向高的前台速率、误报「后台偏高/异常」。
+    if (dt < 500) { run.last = now; run.lastSt = ch ? 'chg' : (document.hidden ? 'bg' : 'fg'); return; }
     var dLv = (run.lastLv - lv) * 100; // 电量百分点（下降为正；回升为负，只进 net 不进各段掉电）
     var st = (dt > run.iv * 2.5) ? stalledSeg(run) : run.lastSt;
     if (st === 'chg') { run.chgMs += dt; }
@@ -337,8 +340,12 @@
     var L = [];
     var unkMs = run.unkMs || 0;
     var totalMs = run.fgMs + run.bgMs + run.gapMs + unkMs;
+    // #1015b：心跳平均间隔只摊「页面活着」的时间（前台+后台+不确定+充电中）——gapMs 是页面被
+    // 关掉/回收的那段，它摊进去会把「实测平均每 90 秒一次」算出来，于是报告一边写「页面未运行
+    // 48 分钟」一边指控内核把定时器节流了。
     var wallMs = totalMs + run.chgMs;
-    var avgIv = run.n > 0 ? wallMs / run.n : 0;
+    var liveMs = run.fgMs + run.bgMs + unkMs + run.chgMs;
+    var avgIv = run.n > 0 ? liveMs / run.n : 0;
     // #947 抖动封顶：三段各自「只记下降」的毛和会把电量计的回升也当成本段掉电（净掉 0 格同样能算出
     // 几十 %/小时）。按非充电时段的有符号净掉电等比缩到净值为上限——各段速率之和恒等于实测净掉电。
     // 旧版本的 run 记录没有 net 字段＝不封顶（把 undefined 当 0 会把真测到的一窗抹平）。
@@ -356,8 +363,12 @@
     }
     var rFg = rate(fgD, run.fgMs), rBg = rate(bgD, run.bgMs);
     var cands = [];
-    if (run.fgMs >= SEG_MIN_MS) cands.push({ n: '前台使用', r: rFg, b: bandOf(rFg, FG_WARN, FG_BAD) });
-    if (run.bgMs >= SEG_MIN_MS) cands.push({ n: '后台页面自身', r: rBg, b: bandOf(rBg, BG_WARN, BG_BAD) });
+    // #1015b：判级门槛必须与「粗测」门槛同一个。段长 5~15 分钟的数字在明细里被标成「粗测、仅供参考」
+    // 却仍能坐上结论席——1% 颗粒度下 5 分钟一段＝每 ±1 格就是 ±12%/小时，比 FG_WARN~FG_BAD 整条带
+    // 还宽，会产出「结论：异常」＋下一行「（不足 15 分钟，粗测、仅供参考）＋建议关掉后台保活」这种
+    // 自相矛盾且照做无据的报告。两者都收到 SEG_COARSE_MS（15 分钟）。
+    if (run.fgMs >= SEG_COARSE_MS) cands.push({ n: '前台使用', r: rFg, b: bandOf(rFg, FG_WARN, FG_BAD) });
+    if (run.bgMs >= SEG_COARSE_MS) cands.push({ n: '后台页面自身', r: rBg, b: bandOf(rBg, BG_WARN, BG_BAD) });
     var order = { '正常': 0, '偏高': 1, '异常': 2 };
     var worst = null;
     cands.forEach(function (c) { if (!worst || order[c.b] > order[worst.b]) worst = c; });
@@ -365,7 +376,11 @@
     var rateTxt = worst ? (worst.n + ' ' + worst.r + '%/小时') : '';
     // #1015：窗口不足 1 小时在这里点明「属粗测」——结论行只加后缀，不动开头（开头恒为「结论：<判级>」，
     // 报告口径与既有解析都靠这个形状）。
-    L.push('结论：' + verdict + (worst ? '（' + worst.n + '约 ' + worst.r + '%/小时）' : totalMs < SEG_MIN_MS ? '（窗口太短/掉电小于 1%，看下方粗测值）' : '（各段样本都不足 5 分钟，看下方粗测值）') + (totalMs < BAT_REF_MS ? '· 窗口不足 1 小时，属粗测' : ''));
+    // #1015b：窗口后缀改按「用户选的档位」判（run.ms）。totalMs 含 gapMs（页面没在跑的那段），
+    // 开着 1 小时档、中间被系统关掉 50 分钟时 totalMs 照样≈1 小时 ⇒ 粗测提示正好在最薄的数据上
+    // 消失，与它存在的意义相反。
+    var winMs = run.ms || totalMs;
+    L.push('结论：' + verdict + (worst ? '（' + worst.n + '约 ' + worst.r + '%/小时）' : totalMs < SEG_MIN_MS ? '（窗口太短/掉电小于 1%，看下方粗测值）' : '（各段样本都不足 15 分钟，看下方粗测值）') + (winMs < BAT_REF_MS ? '· 窗口不足 1 小时，属粗测' : ''));
     L.push('窗口 ' + mins(totalMs) + '：前台 ' + mins(run.fgMs) + ' / 后台（页面仍在跑）' + mins(run.bgMs) + ' / 页面未运行 ' + mins(run.gapMs) + (unkMs > 0 ? ' / 不确定 ' + mins(unkMs) : '') + (run.chgMs > 0 ? ' / 充电中 ' + mins(run.chgMs) : ''));
     L.push('电量 ' + Math.round(run.lv0 * 100) + '% → ' + Math.round(run.lvEnd * 100) + '%（采样 ' + run.n + ' 次，设计每 ' + Math.round(run.iv / 1000) + ' 秒、实测平均每 ' + Math.round(avgIv / 1000) + ' 秒）');
     if (jitter > 0) L.push('· 电量计抖动 ' + (Math.round(jitter * 10) / 10) + ' 个百分点（掉了又回升），下方各段速率已按实测净掉电 ' + (Math.round(Math.max(0, net) * 10) / 10) + '% 等比折算');
@@ -389,7 +404,9 @@
     if (run.bgMs >= SEG_MIN_MS && bgD > 0) adv.push('后台段有 ' + rBg + '%/小时：这段就是「页面留在后台继续跑」的代价（保活音频 + 定时器），不用后台消息时关掉「后台保活」最省电');
     if (run.gapMs > 0) adv.push('窗口内有 ' + mins(run.gapMs) + ' 页面未运行（重开过/被系统回收过）：想让后台也一直跑，靠「后台保活」；不想耗电就别开，两者取一');
     if (unkMs >= SEG_MIN_MS) adv.push('有 ' + mins(unkMs) + ' 落在「不确定」段（心跳停了但说不清原因）：开着「后台保活」再跑一轮对照——保活开着时页面不被冻结，这段应明显缩短；缩不了就是内核在节流，那部分耗电本来就归本站');
-    if (fgD <= 0 && bgD <= 0 && gapD <= 0 && run.chgMs === 0) adv.push('窗口内电量没有下降：要么耗电极低、要么时间还太短（电量 1% 一跳）——想抓异常请跑 1 小时以上或过夜档');
+    // #1015b：补 unkD——#947 引入「不确定」段后这条守卫没跟上，于是「不确定段 10%/小时 偏高」和
+    // 「窗口内电量没有下降」会同时出现在一份报告里。
+    if (fgD <= 0 && bgD <= 0 && gapD <= 0 && unkD <= 0 && run.chgMs === 0) adv.push('窗口内电量没有下降：要么耗电极低、要么时间还太短（电量 1% 一跳）——想抓异常请跑 1 小时以上或过夜档');
     if (run.chgMs > 0) adv.push('测的时候有 ' + mins(run.chgMs) + ' 在充电：充电本身发热/进电，想测准请拔掉充电器重跑一轮');
     if (!adv.length) adv.push('本窗口未见异常。要复现「耗电快」的现场，就在你觉得掉电快的时段随时点本行再测一轮，报告对比着看');
     adv.forEach(function (a, i) { L.push((i + 1) + '. ' + a); });
@@ -462,13 +479,25 @@
       + (enough ? '（末段比开头' + (slow >= 0 ? '慢 ' : '快 ') + Math.abs(Math.round(slow * 1000) / 10) + '%）' : '（负载样本不足）')
       + (short ? '· 本次是 ' + durTxt(loadMs) + '快测：只说明「此刻有没有被限速」，测不出不代表不烫' : ''));
     L.push('采样 ' + Math.round((rep.totalMs || 0) / 1000) + ' 秒：静置 ' + durTxt(HEAT_IDLE_MS) + ' 量基准帧率 → 固定负载 ' + durTxt(loadMs)
-      + '（' + r.length + ' 片 × 约 ' + Math.round(HEAT_SLICE_MS) + 'ms，每片 ' + Math.round((rep.workN || 0) / 10000) + ' 万次运算）→ 再静置 ' + durTxt(HEAT_TAIL_MS) + ' 看帧率恢复'
+      + '（' + r.length + ' 片、每片实测算 ' + (r.length ? Math.round(med(r) * 10) / 10 : 0) + 'ms × ' + Math.round((rep.workN || 0) / 10000) + ' 万次运算，按本机速度现场校准）→ 再静置 ' + durTxt(HEAT_TAIL_MS) + ' 看帧率恢复'
       + (rep.pauseMs >= 1000 ? '（中途页面不可见 ' + durTxt(rep.pauseMs) + ' 已暂停、不计入负载）' : ''));
     if (bins.length >= 2) L.push('· 负载耗时趋势（整窗按时间分成 ' + bins.length + ' 段的中位）：' + bins.map(function (b) { return Math.round(b * 10) / 10; }).join(' → ') + ' ms');
     if (enough) L.push('· 开头 10% 中位 ' + Math.round(early) + 'ms → 最后 10% 中位 ' + Math.round(late) + 'ms（' + (slow >= 0 ? '+' : '') + Math.round(slow * 1000) / 10 + '%；判级：<10% 未见降频 / 10~25% 轻度 / ≥25% 明显降频）');
+    // #1015b：固定负载只可能越跑越慢，「明显更快」只说明基准不稳（校准时主频/JIT 未定、或后台任务
+    // 让出资源），这种轮次的判级不可信——旧版照样印「结论：未见降频」，把仪器问题当成了好消息。
+    if (enough && slow <= -0.15) L.push('· 注意：末段比开头快 ' + Math.abs(Math.round(slow * 1000) / 10) + '%——固定负载不该变快，多半是校准时主频/JIT 还没稳定（或后台任务刚结束），这一轮的降频判定不可靠，建议重跑一轮');
     var idleFps = rep.idleMs > 0 ? Math.round(rep.idleFrames * 1000 / rep.idleMs) : 0;
     var tailFps = rep.tailMs > 0 ? Math.round(rep.tailFrames * 1000 / rep.tailMs) : 0;
-    L.push('· 帧率：负载前静置约 ' + idleFps + 'fps' + (rep.idleWorst > 50 ? '（最慢帧 ' + rep.idleWorst + 'ms）' : '') + ' → 负载后静置约 ' + tailFps + 'fps' + (rep.tailWorst > 50 ? '（最慢帧 ' + rep.tailWorst + 'ms）' : '') + '；负载期本测故意占满 CPU，掉帧 ' + rep.workJank + ' 帧属预期，只作对照');
+    // #1015b：没测到的帧率宁可说「未测到」，也不印 0fps——0fps 会被读成「卡死」，而真相是那段页面不可见。
+    var idleTxt = (rep.idleMs > 0 && rep.idleFrames >= 5)
+      ? ('负载前静置约 ' + idleFps + 'fps' + (rep.idleWorst > 50 ? '（最慢帧 ' + rep.idleWorst + 'ms）' : ''))
+      : '负载前静置：未测到（那段页面不可见）';
+    var tailTxt = rep.tailHid
+      ? '负载后静置：未测到（那段页面不可见）'
+      : ((rep.tailMs > 0 && rep.tailFrames >= 5)
+        ? ('负载后静置约 ' + tailFps + 'fps' + (rep.tailWorst > 50 ? '（最慢帧 ' + rep.tailWorst + 'ms）' : ''))
+        : '负载后静置：未测到（本次提前结束）');
+    L.push('· 帧率：' + idleTxt + ' → ' + tailTxt + '；负载期本测故意占满 CPU，掉帧 ' + rep.workJank + ' 帧属预期，只作对照');
     if (rep.batt) L.push('· 电池：' + rep.batt);
     L.push('· 发热相关因素：' + factorLines().join('；'));
     L.push('· 说明：浏览器读不到手机温度（系统不提供这个接口），本自测测的是「发烫的后果」——主频被系统压低后，同样的活越干越慢。手机从冷到热要 1 分钟以上，所以短档只答「此刻有没有被限速」，要看「越跑越慢」请用 3 分钟档；测出「明显降频」＝手机很可能正在烫并限速（或开着省电/低电量模式，两者表现一样）；没测出也不代表不烫（可能还没到限频阈值）。');
@@ -479,6 +508,7 @@
     if (verdict === '明显降频') adv.push('先把手机放凉几分钟再测一轮对照：凉机也「明显降频」＝多半是开了省电/低电量模式或系统长期限制性能，不是发烫；热机才降频＝就是发烫引起的');
     if (verdict === '轻度降频') adv.push('轻度降频：对照手摸温度，若确实烫＝按下方因素逐条排除；不烫则可能是系统温控偏保守，属正常波动');
     if (short) adv.push('这次只跑了 ' + durTxt(loadMs) + '（快测）：手机还没热起来就结束了，测不出「越跑越慢」是正常的——要判断发烫降频，请用 3 分钟档再跑一轮（跑完让手机凉一会儿）');
+    if (enough && slow <= -0.15) adv.push('本轮末段比开头快（固定负载不该变快）＝测量基准不稳，请重跑一轮再下结论；连跑两轮都「越跑越快」，把两份报告一起发给开发者');
     var keepOn = false;
     try { var ka = (typeof window.__kaProbe === 'function') ? window.__kaProbe() : null; keepOn = !!(ka && ka.keep); } catch (e) {}
     if (keepOn) adv.push('「后台保活」开着：页面在后台持续运行＝最常见的发热源，不用后台通知时到 设置→系统 关掉，几分钟后再测一轮对照');
@@ -500,13 +530,13 @@
       ms = clamp(Number(ms) || HEAT_API_MS, HEAT_DURS['10'], HEAT_DURS['300']);
       var rep = { t: Date.now(), slices: [], idleFrames: 0, idleMs: 0, idleWorst: 0, tailFrames: 0, tailMs: 0, tailWorst: 0, workFrames: 0, workWorst: 0, workJank: 0, workN: 0, batt: null, totalMs: 0, loadMs: 0, pauseMs: 0, stopped: 0 };
       var t0 = performance.now(), last = t0, phase = 'idle', raf = 0, done = false;
-      var actMs = 0, actAt = 0, hidAt = 0, lastTick = 0, tailAt = 0;
+      var actMs = 0, actAt = 0, hidAt = 0, lastTick = 0, tailAt = 0, idleAt = performance.now();
       function frame(now) {
         if (done) return;
         var d = now - last; last = now;
         if (phase === 'idle') { if (d < 250) { rep.idleFrames++; if (d > rep.idleWorst) rep.idleWorst = Math.round(d); } }
         else if (phase === 'load') { if (d < 250) rep.workFrames++; if (d > rep.workWorst) rep.workWorst = Math.round(d); if (d > 34) rep.workJank++; }
-        else if (phase === 'tail') { if (d < 250) { rep.tailFrames++; if (d > rep.tailWorst) rep.tailWorst = Math.round(d); } }
+        else if (phase === 'tail') { if (document.hidden) rep.tailHid = 1; if (d < 250) { rep.tailFrames++; if (d > rep.tailWorst) rep.tailWorst = Math.round(d); } }
         raf = requestAnimationFrame(frame);
       }
       raf = requestAnimationFrame(frame);
@@ -521,6 +551,9 @@
         done = true;
         try { cancelAnimationFrame(raf); } catch (e) {}
         rep.totalMs = performance.now() - t0;
+        // #1015b：收尾也要结算「此刻还在后台」的那段暂停——只有 slice() 结算时，静置期/收尾期正处
+        // 后台的暂停时长会被整块丢掉（报告该说「中途不可见 X」却一字不提）。
+        if (hidAt) { rep.pauseMs += performance.now() - hidAt; hidAt = 0; }
         rep.tailMs = tailAt > 0 ? Math.max(0, performance.now() - tailAt) : 0;
         _heatRunning = false; _heatProg = null;
         var out = heatText(rep);
@@ -543,23 +576,40 @@
         if (_heatStop) { rep.stopped = 1; return finish(); }
         var t = performance.now();
         heatWork(rep.workN);
-        rep.slices.push(performance.now() - t);
-        actMs += performance.now() - actAt; actAt = performance.now();
+        var dur = performance.now() - t;
+        rep.slices.push(dur);
+        // #1015b：只把「真正在算」的时间计入负载——旧写法 actMs += now - actAt 把片间 setTimeout 的
+        // 往返（实测每片约 5ms，占 60ms 片的 8~11%）也算成负载，3 分钟档实际只压了约 2.7 分钟。
+        actMs += dur;
         rep.loadMs = actMs;
+        actAt = performance.now();
         if (actMs >= ms) { phase = 'tail'; tailAt = performance.now(); tick('tail'); setTimeout(finish, HEAT_TAIL_MS); return; }
         if (actMs - lastTick >= HEAT_TICK_MS) { lastTick = actMs; tick('load'); }
         setTimeout(slice, 0);
       }
       function loadPhase() {
         phase = 'load'; actAt = performance.now();
+        // #1015b：先热身再校准。heatWork 在本页面这里是第一次被调用（解释执行、主频还在爬升），
+        // 冷态量出的单次成本偏大 ⇒ workN 偏小、每片远短于设计值（同一台机器实测冷 2.30ms / 热 1.30ms
+        // per 20 万次；跨轮 workN 实测从 666 万飘到 2400 万）。取三次中位也顺手压掉调度噪声。
         var calN = 200000; // 校准样本大些：performance.now 分辨率下量得准，且各机型同口径
-        var unit = timeWork(calN);
+        for (var wm = 0; wm < 3; wm++) { timeWork(Math.max(calN >> 2, 20000)); }
+        var unit = med([timeWork(calN), timeWork(calN), timeWork(calN)]) || timeWork(calN);
         rep.workN = clamp(Math.round(calN * HEAT_SLICE_MS / Math.max(unit, 0.1)), 500, 400000000);
         tick('load');
         slice();
       }
+      // #1015b：静置期页面不可见＝rAF 不跑，基准帧率根本量不到（旧版照算 idleMs，报告印出
+      // 「负载前静置约 0fps」，而整份前后对照就架在这个基准上）。这里与负载期一样顺延，并把静置窗
+      // 与已采帧数一起重开，重新计一段「真看得见」的静置。
       function idleDone() {
-        rep.idleMs = performance.now() - t0;
+        if (document.hidden) {
+          if (!hidAt) hidAt = performance.now();   // 顺延的这段时间同样是暂停，报告里要如实标出
+          rep.idleFrames = 0; rep.idleWorst = 0; idleAt = performance.now();
+          setTimeout(idleDone, 250);
+          return;
+        }
+        rep.idleMs = performance.now() - idleAt;
         loadPhase();
       }
       setTimeout(idleDone, HEAT_IDLE_MS);
@@ -614,7 +664,7 @@
     if (_heatRunning) {
       var ctlR = window.openModal('发烫自测进行中', '', function () { stopHeat(); }, {
         noInput: true,
-        staticText: '正在跑固定负载' + (_heatProg ? '（剩约 ' + durTxt(_heatProg.left * 1000) + '）' : '') + '：负载切成 60ms 一小片，界面全程可用。\n点「提前结束并出报告」＝立刻结算已测到的部分；点「取消」＝继续跑（手机请放在一边、别操作屏幕）。\n（负载跑满整档才看得出「越跑越慢」；提前结束只能看已测那段，报告里会标明。）'
+        staticText: '正在跑固定负载' + (_heatProg ? '（剩约 ' + durTxt(_heatProg.left * 1000) + '）' : '') + '：负载切成小片连跑，界面不会卡死、但会明显变慢。\n点「提前结束并出报告」＝立刻结算已测到的部分；点「取消」＝继续跑（手机请放在一边、别操作屏幕）。\n（负载跑满整档才看得出「越跑越慢」；提前结束只能看已测那段，报告里会标明。）'
       });
       try { if (ctlR && ctlR.okText) ctlR.okText('提前结束并出报告'); } catch (e) {}
       return;
@@ -630,7 +680,7 @@
       warn: true, staticEmph: true,
       pills: HEAT_PILLS,
       pill: '180',
-      staticText: '**⚠ 10 秒档只能答「此刻有没有被限速」**——手机从冷到热要 1 分钟以上，要看「越跑越慢」请用 **3 分钟档（已设为默认）**。\n\n做法：先静置 3 秒量基准帧率，再持续跑固定工作量 N 分钟（切成 60ms 一小片，界面全程可用、可中途【提前结束】出报告），最后再静置 3 秒看帧率是否恢复；比对整窗趋势＝手机被系统压慢了多少（这就是「降频」）。\n说明：浏览器读不到手机温度（系统没有这个接口），所以本测的是「发烫的后果」而不是温度本身；测出「明显降频」＝手机很可能已经在烫（或开着省电/低电量模式，两者表现一样），没测出也不代表不烫。\n开始后把手机放手边、不要操作屏幕（点按与切页会干扰测量），顶部浮条倒数，结束自动出报告。'
+      staticText: '**⚠ 10 秒档只能答「此刻有没有被限速」**——手机从冷到热要 1 分钟以上，要看「越跑越慢」请用 **3 分钟档（已设为默认）**。\n\n做法：先静置 3 秒量基准帧率，再持续跑固定工作量 N 分钟（切成小片连跑、片间让出主线程：界面不会卡死、可中途【提前结束】出报告，但负载期手机会明显变慢，尽量别操作），最后再静置 3 秒看帧率是否恢复；比对整窗趋势＝手机被系统压慢了多少（这就是「降频」）。\n说明：浏览器读不到手机温度（系统没有这个接口），所以本测的是「发烫的后果」而不是温度本身；测出「明显降频」＝手机很可能已经在烫（或开着省电/低电量模式，两者表现一样），没测出也不代表不烫。\n开始后把手机放手边、不要操作屏幕（点按与切页会干扰测量），顶部浮条倒数，结束自动出报告。'
     });
     try { if (ctl && ctl.okText) ctl.okText('开始（可中途结束）'); } catch (e) {}
   }
@@ -675,7 +725,13 @@
     }
     try {
       document.addEventListener('visibilitychange', function () {
-        if (_batRun && _batBm) { try { sampleOnce(_batRun, _batBm); writeRun(_batRun); } catch (e) {} updateBatSub(); }
+        if (_batRun && _batBm) {
+          try { sampleOnce(_batRun, _batBm); writeRun(_batRun); } catch (e) {}
+          updateBatSub();
+          // #1015b：到点判定不能只放在定时器里——页面被冻结一整段后回前台，这条路上没有窗口检查，
+          // 得等下一个 tick 才结算，那段时间被并成一次采样、窗口被拉长到用户没选过的时长。
+          if (_batRun && Date.now() >= _batRun.t0 + _batRun.ms) endBatRun();
+        }
         popPending();
       });
     } catch (e) {}

@@ -18,13 +18,14 @@ var _styleHooks = [], _obs = [], _origRemove = null, _chip = null, _onClick = nu
 var _seen = 0, _seenIn = 0;   // #966：屏幕点击总数 / 其中落在抽屉内的次数（报障时区分「没点」与「点错地方」）
 var _winMs = 0, _winT0 = 0, _winTimer = null, _acts = [], _actHandler = null, _actEvs = [];
 var _jankTotal = 0, _worst = [];
+var _winSnap = null, _visReset = false, _visHandler = null;
 function now() { try { return performance.now(); } catch (e) { return Date.now(); } }
 function appVer() {
 try { var el = document.getElementById('about-ver-val'); var t = el && String(el.textContent || '').trim(); if (t && t.indexOf('__') < 0) return t; } catch (e) {}
 try { return String(window.APP_VERSION || '未知'); } catch (e2) { return '未知'; }
 }
 function mark(kind, name) { if (_on) _ev.push({ t: now(), k: kind, n: name || '' }); }
-function flip(where) { if (_on) _flips.push({ t: now(), w: where }); }
+function flip(where) { if (_on) { var ft = now(); _flips.push({ t: ft, w: where, idle: msSinceAct(ft) >= WIN_ACT_MS }); } }
 var _other = 0;
 function getVal(s, n) { try { return s.getPropertyValue(n); } catch (e) { return ''; } }
 function hookStyle(el, tag) {
@@ -101,14 +102,17 @@ if (_clicks.length >= MAX_OPS * 6) _clicks.shift();
 _clicks.push({ t: t, in: hit });
 };
 document.addEventListener('click', _onClick, true);
-_actEvs = ['click', 'pointerdown', 'touchstart', 'keydown', 'input', 'scroll'];
+_actEvs = ['click', 'pointerdown', 'touchstart', 'keydown', 'input', 'scroll', 'pointermove', 'touchmove', 'wheel'];
 _actHandler = function () { if (_on) { _acts.push(now()); if (_acts.length > 400) _acts.splice(0, 200); } };
 for (var av = 0; av < _actEvs.length; av++) { try { document.addEventListener(_actEvs[av], _actHandler, { capture: true, passive: true }); } catch (e) {} }
+_visHandler = function () { _visReset = true; };
+try { document.addEventListener('visibilitychange', _visHandler, true); } catch (e) {}
 (function frames() {
 var last = now();
 requestAnimationFrame(function tick() {
 if (!_on) return;
 var t = now();
+if (_visReset) { _visReset = false; last = t; requestAnimationFrame(tick); return; }
 var gap = t - last;
 _frames.push({ t: t, gap: gap });
 if (gap > JANK_MS) {
@@ -161,6 +165,10 @@ else out.push({ t: f.t, n: 1, pg: pg });
 return out;
 }
 function winStats() {
+if (_winSnap) return _winSnap;
+return winCompute();
+}
+function winCompute() {
 if (!_winMs) return null;
 var t0 = _winT0, t1 = t0 + _winMs, i;
 var flips = 0, fr = 0, fc = 0, fg = 0, waste = 0;
@@ -175,7 +183,7 @@ if (e.k === 'n' || e.k === 'dn' || e.k === 'cn' || e.k === 'ss') waste++;
 var idle = [];
 for (i = 0; i < _flips.length; i++) {
 var fl = _flips[i]; if (fl.t < t0) continue; if (fl.t > t1) break;
-if (msSinceAct(fl.t) >= WIN_ACT_MS) idle.push(fl);
+if (fl.idle) idle.push(fl);
 }
 var cl = clusterFlips(idle);
 return { ms: _winMs, flips: flips, flipRoot: fr, flipChat: fc, flipGc: fg, waste: waste, jank: _jankTotal,
@@ -263,7 +271,7 @@ b2.type = 'button';
 b2.textContent = '结束';
 b2.style.cssText = 'border:1px solid rgba(255,255,255,.5);border-radius:12px;padding:4px 10px;background:transparent;color:#fff;font-size:12px;flex:none';
 b1.addEventListener('click', function () { showReport(); });
-b2.addEventListener('click', function () { stop(); });
+b2.addEventListener('click', function () { if (_winMs) finishWin(); else stop(); });
 d.appendChild(txt); d.appendChild(b1); d.appendChild(b2);
 document.body.appendChild(d);
 _chip = d;
@@ -289,7 +297,7 @@ if (!_seen) lines.push('没有采到任何屏幕点击：请点【开始】后�
 else if (!_seenIn) lines.push('没有采到「抽屉里」的点击：这段时间共采到 ' + _seen + ' 次屏幕点击，但都不在 边看边调 的底部抽屉里。请确认点的是「聊天设置/群聊设置 → 美化 → 边看边调」打开的那条底部抽屉里的档位按钮（抽屉里可点的档位＝宽松/标准/紧凑这类胶囊）。');
 else lines.push('没有采到抽屉里的点击：请点【开始】后到 聊天设置/群聊设置 → 美化 → 边看边调 点档位（第 2 下重复点同一个档）。');
 }
-for (var i = 0; i < ops.length; i++) lines.push(opLine(ops[i], i));
+if (!win) for (var i = 0; i < ops.length; i++) lines.push(opLine(ops[i], i));
 var noopOps = ops.filter(function (o) { return !o.writes; });
 var wasteAll = 0, jankAll = 0, worst = 0, flipAll = 0;
 for (var k = 0; k < noopOps.length; k++) {
@@ -315,7 +323,7 @@ if (win.idle) {
 lines.push('· 无操作翻动 ' + win.idle + ' 次：那一下的前 ' + (WIN_ACT_MS / 1000) + ' 秒里没有任何点击/按键/输入/滚动＝最可疑的「自己闪」（也可能是某个模块的定时刷新，按下面对照）：');
 for (var ci = 0; ci < win.clusters.length; ci++) lines.push('   ' + (ci + 1) + '. 第 ' + Math.round((win.clusters[ci].t - _winT0) / 1000) + ' 秒 · ' + win.clusters[ci].pg + ' · 连着翻动 ' + win.clusters[ci].n + ' 次');
 } else {
-lines.push('· 无操作翻动 0 次：窗口内每一次全站样式改写都发生在你操作之后的 ' + (WIN_ACT_MS / 1000) + ' 秒内＝没有「自己闪」的证据');
+lines.push('· 无操作翻动 0 次：窗口内每一次全站样式改写都发生在你操作之后的 ' + (WIN_ACT_MS / 1000) + ' 秒内＝没有「自己闪」的证据（注：新消息自动跟底这类「本网页自己触发的滚动」也会记成有操作，所以「0 次」不等于绝对没有自闪）');
 }
 if (win.worst.length) lines.push('· 最慢的帧：' + win.worst.map(function (x) { return '第 ' + x.off + ' 秒 ' + x.pg + ' ' + x.ms + 'ms'; }).join('｜'));
 var wc = '';
@@ -364,7 +372,9 @@ try { h.s.setProperty = h.set; h.s.removeProperty = h.del; } catch (e) {}
 }
 _styleHooks.length = 0;
 if (_origRemove) { try { DOMTokenList.prototype.remove = _origRemove; } catch (e) {} _origRemove = null; }
+if (_winMs && !_winSnap) { try { _winSnap = winCompute(); } catch (e) {} }
 if (_winTimer) { clearTimeout(_winTimer); _winTimer = null; }
+if (_visHandler) { try { document.removeEventListener('visibilitychange', _visHandler, true); } catch (e) {} _visHandler = null; }
 if (_actHandler) {
 for (var ak = 0; ak < _actEvs.length; ak++) { try { document.removeEventListener(_actEvs[ak], _actHandler, true); } catch (e) {} }
 _actHandler = null;
@@ -378,7 +388,7 @@ function start(winMs) {
 if (_on || !window.openModal) return false;
 _on = true; _other = 0; _seen = 0; _seenIn = 0;
 _clicks = []; _ev = []; _flips = []; _frames = [];
-_winMs = 0; _winT0 = 0; _acts = []; _jankTotal = 0; _worst = [];
+_winMs = 0; _winT0 = 0; _acts = []; _jankTotal = 0; _worst = []; _winSnap = null; _visReset = false;
 if (_winTimer) { clearTimeout(_winTimer); _winTimer = null; }
 arm();
 chip();

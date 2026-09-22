@@ -5996,6 +5996,13 @@ if (document.visibilityState === 'hidden') { chatHiddenAt = Date.now(); if (chat
 else chatResumeRepin();
 });
 window.addEventListener('pageshow', function (e) { if (e.persisted) chatResumeRepin(); }); // bfcache 恢复同闸（pageshow 时 visibilityState 已是 visible）
+function chatEnterPaintThen(fn) {
+let ran = false;
+const run = function () { if (ran) return; ran = true; fn(); }; // 不吞异常：重活里抛错照旧冒到 window.onerror/__jsErrors（#939 口径），诊断链不断
+if (!window.requestAnimationFrame) { setTimeout(run, 16); return; }
+requestAnimationFrame(function () { requestAnimationFrame(function () { setTimeout(run, 0); }); });
+setTimeout(run, 120); // 保险丝：后台标签/页面不可见时 rAF 会被节流甚至不派发，重活不能因此不跑
+}
 function enterChat() {
 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
 const phoneTab = document.querySelector('.tab[data-page="page-phone"]');
@@ -6004,13 +6011,14 @@ document.querySelectorAll('.page').forEach(p => { if (!p.hidden) p.hidden = true
 chatPage.hidden = false;
 chatPinnedBottom = true;
 body.classList.remove('scroll-anchor-auto');
-try { if (window.hydrateLibScopes) window.hydrateLibScopes(['own', 'public']); } catch (e) {}
 fillAvatar('chat-user-av', 'cs-avatar-user');
 fillAvatar('chat-partner-av', 'cs-avatar-partner');
 if (window.applyChatSettings) window.applyChatSettings();
 clearChatUnread();
 chatRebuilding = true; // #841i：进页即有一段「屏上还没有任何列表」的空窗（LS/权威异步读取、首帧未渲），进度条顶上，renderWindow 接手时由 #841e/f 交接、同步收尾就地交回
 updateChatLoading(); // #703：先于 loadMsgs 置位——loadMsgs 里同步 parse LS 快照可能上百毫秒，先让进度条就位
+chatEnterPaintThen(function () {
+try { if (window.hydrateLibScopes) window.hydrateLibScopes(['own', 'public']); } catch (e) {}
 loadMsgs();
 if (inplacePatchIfSameWindow()) { chatRebuilding = false; updateChatLoading(); } // #841j：同窗补丁命中＝零重建无空窗，就地交回标志（不等 renderWindow 接手）
 else renderWindow(false, true);
@@ -6024,6 +6032,7 @@ if (typingOn && chatVisible()) {
 typingEl.hidden = false; // FIX 2026-09-15 #514 进页同款：只切可见性、不写 scrollTop（上面三连已在行隐藏态贴到底）
 }
 schedulePanelPrewarm(2500);
+}); // #1017 第二段（重活）结束
 }
 if (chatApp && chatPage) {
 chatApp.addEventListener('click', () => {

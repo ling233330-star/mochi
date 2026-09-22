@@ -7776,6 +7776,24 @@ if (document.visibilityState === 'hidden') { chatHiddenAt = Date.now(); if (chat
 else chatResumeRepin();
 });
 window.addEventListener('pageshow', function (e) { if (e.persisted) chatResumeRepin(); }); // bfcache 恢复同闸（pageshow 时 visibilityState 已是 visible）
+// FIX 2026-09-22 #1017（用户实报：「进入桌面，然后点击进入聊天，还是没有加载动画缓冲啊，导致页面卡几秒」）：
+// 进聊天页的重活（loadMsgs 里同步 parse LS 快照、权威回读收尾、整窗重建、贴底收尾）此前与
+// 「切页 + 顶进度条」同处**一个任务**：进度条 #703 置位之后，#841j 同窗补丁命中又在同一任务里
+// 当场撤掉它——浏览器连一个中间帧都没有机会画。无头实测（1× 节流、300 条历史、屏上已同窗、
+// 探针用访问器只观测不改写）：进度条 hidden 由 false 到 true 相隔 **1ms**，全程 **0 帧可见**；
+// 4× 节流下同类场景也只活 5ms。用户所见正是「没有缓冲动画、页面定住几秒，然后内容直接出来」。
+// 修法（零机型分支、零新状态）：把 enterChat 拆成「切页＋顶进度条」与「重活」两段，中间等一帧
+// 真正上屏——rAF 回调跑在绘制之前，故第一帧先把聊天页与进度条画出去，第二个 rAF 里才跑重活；
+// 重活那 100~900ms 主线程被占住期间，进度条卡片已经画在屏上（CSS 动画走 transform 合成器路径，
+// 见 chat-main.css 的 chatLoadSlide）。重活整段与旧版逐字节相同、只是晚一帧开始，撤销仍由既有
+// updateChatLoading / renderWindow 收尾逻辑负责，不新增标志、不动机型。
+function chatEnterPaintThen(fn) {
+let ran = false;
+const run = function () { if (ran) return; ran = true; fn(); }; // 不吞异常：重活里抛错照旧冒到 window.onerror/__jsErrors（#939 口径），诊断链不断
+if (!window.requestAnimationFrame) { setTimeout(run, 16); return; }
+requestAnimationFrame(function () { requestAnimationFrame(function () { setTimeout(run, 0); }); });
+setTimeout(run, 120); // 保险丝：后台标签/页面不可见时 rAF 会被节流甚至不派发，重活不能因此不跑
+}
 function enterChat() {
 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
 const phoneTab = document.querySelector('.tab[data-page="page-phone"]');
@@ -7792,15 +7810,17 @@ chatPage.hidden = false;
 	// 零机型分支：只在进聊天这一瞬复位，用户进语音/后台期间聊天内滚动语义（#162/#378/#416）不变。
 	chatPinnedBottom = true;
 	body.classList.remove('scroll-anchor-auto');
-	// v3.28.x：进入聊天页即按需取回字卡库（冷启动挂起大键）——专属字卡优先（回复池主源），
-	// 公用随后；配合 replyOnce 内的等待，避免首条/持续回复落兜底卡。
-	try { if (window.hydrateLibScopes) window.hydrateLibScopes(['own', 'public']); } catch (e) {}
 fillAvatar('chat-user-av', 'cs-avatar-user');
 fillAvatar('chat-partner-av', 'cs-avatar-partner');
 if (window.applyChatSettings) window.applyChatSettings();
 clearChatUnread();
 chatRebuilding = true; // #841i：进页即有一段「屏上还没有任何列表」的空窗（LS/权威异步读取、首帧未渲），进度条顶上，renderWindow 接手时由 #841e/f 交接、同步收尾就地交回
 updateChatLoading(); // #703：先于 loadMsgs 置位——loadMsgs 里同步 parse LS 快照可能上百毫秒，先让进度条就位
+// #1017：置位只是「标志」。下面这一帧必须留给浏览器真的把聊天页与进度条画出去，重活（取字卡库、
+// loadMsgs、整窗重建/同窗补丁、贴底收尾）挪进第二个 rAF——两段之间没有任何中间绘制（实测 1ms）
+// 才是用户说的「没有加载动画缓冲」。切页/头像/聊天设置/已读角标仍在上面第一段，保证首帧内容正确。
+chatEnterPaintThen(function () {
+try { if (window.hydrateLibScopes) window.hydrateLibScopes(['own', 'public']); } catch (e) {}
 loadMsgs();
 // v3.26.x #220 聊天重开不闪：屏上消息区仍与当前 msgs 同窗同貌（同桌面、同条数、
 // 渲染后归一化没改过窗口内容、窗口未裁剪——顶部上翻裁剪后 renderStart>0 不满足）
@@ -7821,6 +7841,7 @@ typingEl.hidden = false; // FIX 2026-09-15 #514 进页同款：只切可见性�
 // FIX #907：进聊天页也是一次预热时机——多数用户是「打开应用→进聊天→才点开面板」，
 // 只靠 load+4s 那一班会在面板无几何时白跑（mochiPrewarmEmojiPanel 有 page-chat hidden 守卫）。
 schedulePanelPrewarm(2500);
+}); // #1017 第二段（重活）结束
 }
 if (chatApp && chatPage) {
 chatApp.addEventListener('click', () => {

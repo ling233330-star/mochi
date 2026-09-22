@@ -4371,7 +4371,10 @@ const FIX_SENTINELS = [
   { name: '#1015m 用户活动锚（删＝打字/切页/上滑触发的样式改写被冤成「自己闪」）', file: 'js/flash-check.js', needle: "_actEvs = ['click', 'pointerdown', 'touchstart', 'keydown', 'input', 'scroll'];" },
   { name: '#1015n 长窗口到点自动出报告（删＝时间到了不出报告，用户不知道还得去点浮条）', file: 'js/flash-check.js', needle: "if (left <= 0) { chipSay('时间到，正在出报告…'); finishWin(); return; }" },
   { name: '#1015o 长窗口掉帧累计与最慢帧现场（删＝按 6000 截断的帧数组统计＝长窗口掉帧数严重偏低）', file: 'js/flash-check.js', needle: '_worst.push({ off: Math.round((t - _winT0) / 1000), pg: pageName(), ms: Math.round(gap) });' },
-  { name: '#1015p 三行自测文案写明时长与默认档（删＝工具里只写「约 10 秒」，用户不知道有长档，本批口径回退）', file: 'index.html', needle: '10 秒~5 分钟测发烫降频（默认 3 分钟，可中途结束）' }
+  { name: '#1015p 三行自测文案写明时长与默认档（删＝工具里只写「约 10 秒」，用户不知道有长档，本批口径回退）', file: 'index.html', needle: '10 秒~5 分钟测发烫降频（默认 3 分钟，可中途结束）' },
+  { name: '#1017a 进聊天页「先上屏一帧再跑重活」（删＝进度条置位与撤销又落回同一任务＝用户那句「没有加载动画缓冲」复发）', file: 'js/chat.js', needle: "requestAnimationFrame(function () { requestAnimationFrame(function () { setTimeout(run, 0); }); });" },
+  { name: '#1017b 进聊天页重活挂在首帧之后（改回当场同步跑 loadMsgs/重建＝置位即撤销、进度条再次从未上屏）', file: 'js/chat.js', needle: "chatEnterPaintThen(function () {" },
+  { name: '#1017c 重活保险丝（删＝后台标签/不可见页面 rAF 不派发时进聊天永不渲染）', file: 'js/chat.js', needle: "setTimeout(run, 120);" },
 ];
 try {
   const built = CHECK_SENTINELS ? '' : readFileSync(join(root, 'index.html'), 'utf8');

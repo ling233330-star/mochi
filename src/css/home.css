@@ -1,7 +1,14 @@
+body {
+  background-image: url('https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=2070&auto=format&fit=crop') !important;
+  background-size: cover !important;
+  background-attachment: fixed !important;
+  background-position: center !important;
+}
+
 /* ===== 手机桌面（情侣空间） ===== */
 /* 小组件背景色 / 边框色 / 按钮色 / 按钮文字色 / 爱心外框色 / 透明度：CSS 变量控制，由「手机桌面美化」设置 */
 :root {
-  --widget-bg:#ffffff;
+  --widget-bg:rgba(255, 255, 255, 0.65);
   --widget-border:rgba(0,0,0,.1);
   /* FIX 2026-09-16 #562：桌面小组件按钮默认跟随「主题色」(--btn-bg/--btn-ink) 而非写死纯黑——
      原来默认写死 #111111，用户在「边看边调」里点主题色时桌面（按钮是桌面上唯一用强调色的
@@ -12,7 +19,7 @@
   --widget-heart:#111111;
   --widget-opacity:1;
   --app-ico-radius:18px;
-  --desk-bg-blur:0px;
+  --desk-bg-blur:15px;
   --desk-bg-mask-op:0;
   --desk-card-radius:20px;
 }

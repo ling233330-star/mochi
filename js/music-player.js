@@ -1080,15 +1080,16 @@ next();
 function readCeInput(id) {
 const el = document.getElementById(id);
 if (!el) return '';
+const stripTags = (s) => String(s).replace(/<[^>]*>/g, '').trim();
 try {
 const v = el.value;
-if (v !== undefined && v !== null && String(v).trim()) return String(v).trim();
+if (v !== undefined && v !== null && stripTags(v)) return stripTags(v);
 } catch (e) {}
 try {
 const box = el.__ceBox || (el.parentNode && el.parentNode.querySelector('.ce-box[data-for="' + (el.id || '') + '"]'));
 if (box) {
 const t = (box.innerText !== undefined ? box.innerText : box.textContent) || '';
-if (t.trim()) return t.trim();
+if (stripTags(t)) return stripTags(t);
 }
 } catch (e) {}
 return '';
